@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, StyleSheet, StyleProp, ViewStyle } from 'react-native';
 import { Colors } from '../../constants/Colors';
+import { useSOS } from '../../context/SOSContext';
 
 interface CardProps {
   children: React.ReactNode;
@@ -19,12 +20,26 @@ export const Card: React.FC<CardProps> = ({
   accessibilityLabel,
   accessibilityRole,
 }) => {
+  const { themeColors } = useSOS();
+
   const getVariantStyle = () => {
     switch (variant) {
       case 'navy':
-        return styles.cardNavy;
+        return [
+          styles.cardNavy,
+          {
+            backgroundColor: themeColors.cardNavyBackground,
+            borderColor: themeColors.cardBorder,
+          },
+        ];
       case 'emergency':
-        return styles.cardEmergency;
+        return [
+          styles.cardEmergency,
+          {
+            backgroundColor: themeColors.emergencySurface,
+            borderColor: themeColors.emergencyPrimary,
+          },
+        ];
       default:
         return styles.cardWhite;
     }

@@ -102,3 +102,5 @@ frontend/.expo-shared/
 # TypeScript declaration cache
 frontend/*.tsbuildinfo
 *.tsbuildinfo
+backend/.env
+frontend/.env

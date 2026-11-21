@@ -64,7 +64,7 @@ export interface SOSAlert {
 
 export type CountdownDuration = 0 | 3 | 5 | 10 | 15;
 
-export type AppTheme = 'navy' | 'midnight' | 'high-contrast';
+export type AppTheme = 'light_white' | 'midnight_navy';
 
 export interface LocalUserProfile {
   full_name: string;
@@ -106,6 +106,17 @@ export interface EmergencyHistoryItem {
   contacts_notified_count?: number;
   notes?: string;
   duration_minutes?: number;
+}
+
+export interface BreadcrumbPoint {
+  id?: number;
+  alert_id?: number;
+  latitude: number;
+  longitude: number;
+  accuracy?: number | null;
+  speed?: number | null;
+  heading?: number | null;
+  timestamp: string;
 }
 
 export interface LocationCoordinates {

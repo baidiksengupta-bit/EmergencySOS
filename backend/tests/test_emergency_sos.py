@@ -337,7 +337,7 @@ def test_get_current_user_profile_invalid_token(client):
 
 def test_contacts_crud_lifecycle(client, auth_user):
     """Verify complete CRUD lifecycle: create, list, and delete."""
-    # 1. Create contact
+    # 1. Create contact (testing both with and without trailing slash)
     create_payload = {
         "name": "Dr. Marcus Brody",
         "phone_number": "+1 (555) 444-3322",
@@ -346,7 +346,7 @@ def test_contacts_crud_lifecycle(client, auth_user):
         "is_primary": False,
     }
     create_res = client.post(
-        "/api/v1/contacts/",
+        "/api/v1/contacts",
         json=create_payload,
         headers=auth_user["headers"],
     )
@@ -356,23 +356,35 @@ def test_contacts_crud_lifecycle(client, auth_user):
     assert contact["name"] == create_payload["name"]
     assert contact["user_id"] == auth_user["user_id"]
 
-    # 2. List contacts
+    # 2. List contacts (testing both without trailing slash and with trailing slash)
+    list_res_no_slash = client.get("/api/v1/contacts", headers=auth_user["headers"])
+    assert list_res_no_slash.status_code == 200
     list_res = client.get("/api/v1/contacts/", headers=auth_user["headers"])
     assert list_res.status_code == 200
     contact_ids = [c["id"] for c in list_res.json()]
     assert contact_id in contact_ids
 
-    # 3. List contacts by user ID endpoint
+    # 3. Update contact via PATCH /api/v1/contacts/{contact_id}
+    patch_res = client.patch(
+        f"/api/v1/contacts/{contact_id}",
+        json={"relationship_label": "Chief Physician", "is_primary": True},
+        headers=auth_user["headers"],
+    )
+    assert patch_res.status_code == 200
+    assert patch_res.json()["relationship_label"] == "Chief Physician"
+    assert patch_res.json()["is_primary"] is True
+
+    # 4. List contacts by user ID endpoint
     by_user_res = client.get(f"/api/v1/contacts/user/{auth_user['user_id']}")
     assert by_user_res.status_code == 200
     assert any(c["id"] == contact_id for c in by_user_res.json())
 
-    # 4. Delete contact
+    # 5. Delete contact
     del_res = client.delete(f"/api/v1/contacts/{contact_id}", headers=auth_user["headers"])
     assert del_res.status_code == 200
     assert del_res.json()["id"] == contact_id
 
-    # 5. Verify deleted from list
+    # 6. Verify deleted from list
     post_del_res = client.get("/api/v1/contacts/", headers=auth_user["headers"])
     assert all(c["id"] != contact_id for c in post_del_res.json())
 
@@ -477,4 +489,79 @@ def test_breadcrumb_nonexistent_alert(client):
         json={"alert_id": 999999, "latitude": 37.7749, "longitude": -122.4194},
     )
     assert response.status_code == 404
+
+
+# ==============================================================================
+# 12. Nearby Emergency Services (Police & Hospitals) Tests
+# ==============================================================================
+
+def test_nearby_services_validation(client):
+    """GET /location/nearby-services validates latitude and longitude coordinates."""
+    # Missing required query params
+    res_missing = client.get("/api/v1/location/nearby-services")
+    assert res_missing.status_code == 422
+
+    # Invalid latitude
+    res_invalid = client.get("/api/v1/location/nearby-services?lat=95.0&lng=-122.4194")
+    assert res_invalid.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_nearby_services_mocked_osm(client, monkeypatch):
+    """GET /location/nearby-services formats and returns police and hospitals sorted by distance."""
+    from app.services.location_service import location_service
+
+    sample_mock_data = [
+        {
+            "id": "osm-node-1001",
+            "name": "Central Police Station",
+            "category": "police",
+            "latitude": 37.7750,
+            "longitude": -122.4190,
+            "distance_km": 0.35,
+            "address": "123 Justice Way, City Center",
+        },
+        {
+            "id": "osm-way-2002",
+            "name": "St. Jude Emergency Hospital",
+            "category": "hospital",
+            "latitude": 37.7780,
+            "longitude": -122.4150,
+            "distance_km": 0.85,
+            "address": "456 Healing Blvd",
+        },
+    ]
+
+    async def mock_fetch(*args, **kwargs):
+        return sample_mock_data
+
+    monkeypatch.setattr(location_service, "fetch_nearby_services_from_osm", mock_fetch)
+
+    response = client.get("/api/v1/location/nearby-services?lat=37.7749&lng=-122.4194&radius_m=3000")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 2
+    assert data[0]["name"] == "Central Police Station"
+    assert data[0]["category"] == "police"
+    assert data[0]["distance_km"] == 0.35
+    assert data[1]["name"] == "St. Jude Emergency Hospital"
+    assert data[1]["category"] == "hospital"
+    assert data[1]["distance_km"] == 0.85
+
+
+@pytest.mark.asyncio
+async def test_nearby_services_overpass_timeout_returns_503(client, monkeypatch):
+    """GET /location/nearby-services returns HTTP 503 when Overpass API times out."""
+    import httpx
+    from app.services.location_service import location_service
+
+    async def mock_timeout(*args, **kwargs):
+        raise httpx.TimeoutException("Overpass request timed out")
+
+    monkeypatch.setattr(location_service, "fetch_nearby_services_from_osm", mock_timeout)
+
+    response = client.get("/api/v1/location/nearby-services?lat=37.7749&lng=-122.4194")
+    assert response.status_code == 503
+    assert "temporarily unreachable or timed out" in response.json()["detail"]
+
 

@@ -34,7 +34,7 @@ const sirenSoundAsset = require('../../assets/sounds/sos-siren.mp3');
 const { width } = Dimensions.get('window');
 
 export default function HomeScreen() {
-  const { settings, contacts, history, addDemoAlertRecord, refreshPermissionStatus } = useSOS();
+  const { settings, contacts, history, addDemoAlertRecord, refreshPermissionStatus, themeColors } = useSOS();
 
   // Preloaded Audio Player using Expo's expo-audio
   const sirenPlayer = useAudioPlayer(sirenSoundAsset);
@@ -464,8 +464,8 @@ export default function HomeScreen() {
   };
 
   return (
-    <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeContainer}>
-      <StatusBar barStyle="light-content" />
+    <SafeAreaView edges={['top', 'left', 'right']} style={[styles.safeContainer, { backgroundColor: themeColors.background }]}>
+      <StatusBar barStyle={themeColors.statusBarStyle} />
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
@@ -480,10 +480,10 @@ export default function HomeScreen() {
               <Ionicons name="shield-checkmark" size={20} color={Colors.white} />
             </View>
             <View style={styles.brandTextGroup}>
-              <Text style={styles.brandTitle}>
+              <Text style={[styles.brandTitle, { color: themeColors.textPrimary }]}>
                 Emergency<Text style={styles.brandAccent}>SOS</Text>
               </Text>
-              <Text style={styles.tagline}>Your Safety, One Tap Away.</Text>
+              <Text style={[styles.tagline, { color: themeColors.textSecondary }]}>Your Safety, One Tap Away.</Text>
             </View>
           </View>
 
@@ -499,7 +499,7 @@ export default function HomeScreen() {
         <TouchableOpacity
           activeOpacity={0.75}
           onPress={checkBackendHealth}
-          style={styles.backendStatusBar}
+          style={[styles.backendStatusBar, { backgroundColor: themeColors.cardNavyBackground, borderColor: themeColors.cardBorder }]}
           accessible={true}
           accessibilityRole="button"
           accessibilityLabel={`Backend connection status: ${backendStatus === 'connected' ? 'Connected' : backendStatus === 'checking' ? 'Connecting' : 'Disconnected'}`}
@@ -511,7 +511,7 @@ export default function HomeScreen() {
               size={15}
               color={backendStatus === 'connected' ? Colors.success : Colors.slate400}
             />
-            <Text style={styles.backendStatusTitle}>FastAPI Backend</Text>
+            <Text style={[styles.backendStatusTitle, { color: themeColors.textPrimary }]}>FastAPI Backend</Text>
             <Text style={styles.backendUrlText} numberOfLines={1}>
               192.168.0.127:8000
             </Text>
@@ -557,13 +557,13 @@ export default function HomeScreen() {
         <TouchableOpacity
           activeOpacity={0.8}
           onPress={handleRequestGpsPermission}
-          style={styles.gpsStatusBar}
+          style={[styles.gpsStatusBar, { backgroundColor: themeColors.cardNavyBackground, borderColor: themeColors.cardBorder }]}
           accessible={true}
           accessibilityRole="button"
           accessibilityLabel={`GPS Location Status: ${permissionStatus === 'granted' ? 'Active' : 'Permission Required'}`}
           accessibilityHint="Tap to configure device location permissions"
         >
-          <View style={styles.gpsIconContainer}>
+          <View style={[styles.gpsIconContainer, { backgroundColor: themeColors.isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)' }]}>
             <Ionicons
               name={permissionStatus === 'granted' ? 'location' : 'location-outline'}
               size={18}
@@ -573,7 +573,7 @@ export default function HomeScreen() {
 
           <View style={styles.gpsTextCol}>
             <View style={styles.gpsHeaderRow}>
-              <Text style={styles.gpsStatusLabel}>GPS LOCATION STATUS</Text>
+              <Text style={[styles.gpsStatusLabel, { color: themeColors.textSecondary }]}>GPS LOCATION STATUS</Text>
               <View
                 style={[
                   styles.permissionPill,
@@ -596,7 +596,7 @@ export default function HomeScreen() {
               </View>
             </View>
 
-            <Text style={styles.gpsCoordsText} numberOfLines={1} ellipsizeMode="tail">
+            <Text style={[styles.gpsCoordsText, { color: themeColors.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">
               {currentLocation
                 ? `${currentLocation.latitude.toFixed(5)}° N, ${Math.abs(currentLocation.longitude).toFixed(5)}° W • ${currentLocation.address || 'San Francisco, CA'}`
                 : '37.78825° N, 122.43240° W • San Francisco, CA'}
@@ -604,7 +604,7 @@ export default function HomeScreen() {
           </View>
 
           <View style={styles.gpsArrowBox}>
-            <Ionicons name="chevron-forward" size={16} color={Colors.slate400} />
+            <Ionicons name="chevron-forward" size={16} color={themeColors.textSecondary} />
           </View>
         </TouchableOpacity>
 
@@ -731,8 +731,8 @@ export default function HomeScreen() {
         {/* PROMINENT TEXT: "Press for Emergency"                                */}
         {/* ==================================================================== */}
         <View style={styles.instructionBlock}>
-          <Text style={styles.pressForEmergencyText}>Press for Emergency</Text>
-          <Text style={styles.instructionSubtext}>
+          <Text style={[styles.pressForEmergencyText, { color: themeColors.textPrimary }]}>Press for Emergency</Text>
+          <Text style={[styles.instructionSubtext, { color: themeColors.textSecondary }]}>
             {isEmergencyActive
               ? 'Tap button to stand down simulation • You are safe'
               : 'Tap to initiate 5-second countdown • UI Demonstration'}
@@ -748,12 +748,12 @@ export default function HomeScreen() {
         {/* SHORTCUTS: Emergency Contacts, Live Location, Alert History          */}
         {/* ==================================================================== */}
         <View style={styles.shortcutsSection}>
-          <Text style={styles.sectionHeaderTitle}>QUICK SAFETY SHORTCUTS</Text>
+          <Text style={[styles.sectionHeaderTitle, { color: themeColors.textSecondary }]}>QUICK SAFETY SHORTCUTS</Text>
 
           <View style={styles.shortcutsGrid}>
             {/* Shortcut 1: Emergency Contacts */}
             <TouchableOpacity
-              style={styles.shortcutCard}
+              style={[styles.shortcutCard, { backgroundColor: themeColors.cardNavyBackground, borderColor: themeColors.cardBorder }]}
               activeOpacity={0.75}
               onPress={() => router.push('/(tabs)/contacts')}
               accessible={true}
@@ -764,21 +764,21 @@ export default function HomeScreen() {
                 <Ionicons name="people" size={22} color={Colors.white} />
               </View>
               <View style={styles.shortcutTextCol}>
-                <Text style={styles.shortcutTitle}>Emergency Contacts</Text>
-                <Text style={styles.shortcutSub} numberOfLines={1}>
+                <Text style={[styles.shortcutTitle, { color: themeColors.textPrimary }]}>Emergency Contacts</Text>
+                <Text style={[styles.shortcutSub, { color: themeColors.textSecondary }]} numberOfLines={1}>
                   {contacts.length === 0
                     ? 'No Contacts Saved'
                     : `${contacts.length} Contact${contacts.length === 1 ? '' : 's'} Configured`}
                 </Text>
               </View>
               <View style={styles.shortcutArrow}>
-                <Ionicons name="chevron-forward" size={16} color={Colors.slate400} />
+                <Ionicons name="chevron-forward" size={16} color={themeColors.textSecondary} />
               </View>
             </TouchableOpacity>
 
             {/* Shortcut 2: Live Location */}
             <TouchableOpacity
-              style={styles.shortcutCard}
+              style={[styles.shortcutCard, { backgroundColor: themeColors.cardNavyBackground, borderColor: themeColors.cardBorder }]}
               activeOpacity={0.75}
               onPress={() => router.push('/(tabs)/location')}
               accessible={true}
@@ -789,17 +789,17 @@ export default function HomeScreen() {
                 <Ionicons name="radio" size={22} color={Colors.white} />
               </View>
               <View style={styles.shortcutTextCol}>
-                <Text style={styles.shortcutTitle}>Live Location</Text>
-                <Text style={styles.shortcutSub} numberOfLines={1}>Real-Time GPS Radar</Text>
+                <Text style={[styles.shortcutTitle, { color: themeColors.textPrimary }]}>Live Location</Text>
+                <Text style={[styles.shortcutSub, { color: themeColors.textSecondary }]} numberOfLines={1}>Real-Time GPS Radar</Text>
               </View>
               <View style={styles.shortcutArrow}>
-                <Ionicons name="chevron-forward" size={16} color={Colors.slate400} />
+                <Ionicons name="chevron-forward" size={16} color={themeColors.textSecondary} />
               </View>
             </TouchableOpacity>
 
             {/* Shortcut 3: Alert History */}
             <TouchableOpacity
-              style={styles.shortcutCard}
+              style={[styles.shortcutCard, { backgroundColor: themeColors.cardNavyBackground, borderColor: themeColors.cardBorder }]}
               activeOpacity={0.75}
               onPress={() => router.push('/(tabs)/history')}
               accessible={true}
@@ -810,15 +810,15 @@ export default function HomeScreen() {
                 <Ionicons name="time" size={22} color={Colors.white} />
               </View>
               <View style={styles.shortcutTextCol}>
-                <Text style={styles.shortcutTitle}>Alert History</Text>
-                <Text style={styles.shortcutSub} numberOfLines={1}>
+                <Text style={[styles.shortcutTitle, { color: themeColors.textPrimary }]}>Alert History</Text>
+                <Text style={[styles.shortcutSub, { color: themeColors.textSecondary }]} numberOfLines={1}>
                   {history.length === 0
                     ? 'No Incidents Logged'
                     : `${history.length} Record${history.length === 1 ? '' : 's'} Archived`}
                 </Text>
               </View>
               <View style={styles.shortcutArrow}>
-                <Ionicons name="chevron-forward" size={16} color={Colors.slate400} />
+                <Ionicons name="chevron-forward" size={16} color={themeColors.textSecondary} />
               </View>
             </TouchableOpacity>
           </View>

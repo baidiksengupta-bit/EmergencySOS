@@ -70,7 +70,7 @@ export const EmergencyPlanSection: React.FC<EmergencyPlanSectionProps> = ({
   onItemPress,
   style,
 }) => {
-  const { profile, settings, contacts, locationPermission, emergencyPlanStatus, updateSettings } = useSOS();
+  const { profile, settings, contacts, locationPermission, emergencyPlanStatus, updateSettings, themeColors } = useSOS();
   const [showCountdownModal, setShowCountdownModal] = useState(false);
 
   const {
@@ -184,7 +184,19 @@ export const EmergencyPlanSection: React.FC<EmergencyPlanSectionProps> = ({
       {/* ==================================================================== */}
       {/* Readiness Status Banner                                              */}
       {/* ==================================================================== */}
-      <View style={[styles.statusCard, isReady ? styles.statusCardReady : styles.statusCardIncomplete]}>
+      <View
+        style={[
+          styles.statusCard,
+          {
+            backgroundColor: isReady
+              ? themeColors.isDark ? '#081E26' : '#F0FDF4'
+              : themeColors.cardNavyBackground,
+            borderColor: isReady
+              ? 'rgba(16, 185, 129, 0.4)'
+              : themeColors.cardBorder,
+          },
+        ]}
+      >
         <View style={styles.statusContentRow}>
           <View
             style={[
@@ -200,10 +212,10 @@ export const EmergencyPlanSection: React.FC<EmergencyPlanSectionProps> = ({
           </View>
 
           <View style={styles.statusTextCol}>
-            <Text style={[styles.statusStateTitle, isReady && styles.statusStateTitleReady]} numberOfLines={1}>
+            <Text style={[styles.statusStateTitle, { color: themeColors.textPrimary }, isReady && styles.statusStateTitleReady]} numberOfLines={1}>
               {isReady ? 'Safety Plan: 100% Ready' : 'Emergency Plan Incomplete'}
             </Text>
-            <Text style={styles.statusStateSubtitle} numberOfLines={2}>
+            <Text style={[styles.statusStateSubtitle, { color: themeColors.textSecondary }]} numberOfLines={2}>
               {isReady
                 ? 'All essential local setup tasks are complete. Standby mode is ready for emergency simulation.'
                 : `Complete ${totalCount - completedCount} remaining item${totalCount - completedCount === 1 ? '' : 's'} below to ensure full readiness.`}
@@ -214,13 +226,13 @@ export const EmergencyPlanSection: React.FC<EmergencyPlanSectionProps> = ({
         {/* Progress Bar Container */}
         <View style={styles.progressSection}>
           <View style={styles.progressLabelsRow}>
-            <Text style={styles.progressLabelText}>SETUP COMPLETION</Text>
+            <Text style={[styles.progressLabelText, { color: themeColors.textSecondary }]}>SETUP COMPLETION</Text>
             <Text style={[styles.progressPercentText, isReady && styles.progressPercentTextReady]}>
               {progressPercent}%
             </Text>
           </View>
 
-          <View style={styles.progressTrack}>
+          <View style={[styles.progressTrack, { backgroundColor: themeColors.isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)' }]}>
             <View
               style={[
                 styles.progressFill,
@@ -231,7 +243,7 @@ export const EmergencyPlanSection: React.FC<EmergencyPlanSectionProps> = ({
           </View>
 
           <View style={styles.progressSubRow}>
-            <Text style={styles.progressSubText}>
+            <Text style={[styles.progressSubText, { color: themeColors.textSecondary }]}>
               {completedCount} of {totalCount} safety checks completed
             </Text>
             {isReady && (
@@ -247,8 +259,16 @@ export const EmergencyPlanSection: React.FC<EmergencyPlanSectionProps> = ({
       {/* ==================================================================== */}
       {/* Interactive Setup Checklist                                          */}
       {/* ==================================================================== */}
-      <View style={styles.checklistCard}>
-        <Text style={styles.checklistHeading}>SETUP CHECKLIST</Text>
+      <View
+        style={[
+          styles.checklistCard,
+          {
+            backgroundColor: themeColors.cardNavyBackground,
+            borderColor: themeColors.cardBorder,
+          },
+        ]}
+      >
+        <Text style={[styles.checklistHeading, { color: themeColors.textSecondary }]}>SETUP CHECKLIST</Text>
 
         <View style={styles.checklistWrapper}>
           {checklistItems.map((item, index) => {
@@ -261,6 +281,10 @@ export const EmergencyPlanSection: React.FC<EmergencyPlanSectionProps> = ({
                 onPress={() => handleNavigate(item.route, item.id)}
                 style={[
                   styles.checklistItem,
+                  {
+                    backgroundColor: themeColors.isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.02)',
+                    borderColor: themeColors.cardBorderSubtle,
+                  },
                   !isLast && styles.checklistItemBorder,
                   !item.isComplete && styles.checklistItemIncompleteHighlight,
                 ]}
@@ -288,7 +312,7 @@ export const EmergencyPlanSection: React.FC<EmergencyPlanSectionProps> = ({
                 {/* Title & Description with non-colliding layout */}
                 <View style={styles.itemTextCol}>
                   <View style={styles.itemTitleRow}>
-                    <Text style={styles.itemTitleText} numberOfLines={1}>
+                    <Text style={[styles.itemTitleText, { color: themeColors.textPrimary }]} numberOfLines={1}>
                       {item.title}
                     </Text>
                     <Badge
@@ -300,6 +324,7 @@ export const EmergencyPlanSection: React.FC<EmergencyPlanSectionProps> = ({
                   <Text
                     style={[
                       styles.itemSubtitleText,
+                      { color: themeColors.textSecondary },
                       !item.isComplete && styles.itemSubtitleTextIncomplete,
                     ]}
                     numberOfLines={2}
@@ -309,11 +334,11 @@ export const EmergencyPlanSection: React.FC<EmergencyPlanSectionProps> = ({
                 </View>
 
                 {/* Navigation Arrow */}
-                <View style={styles.arrowContainer}>
+                <View style={[styles.arrowContainer, { backgroundColor: themeColors.isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)' }]}>
                   <Ionicons
                     name="chevron-forward"
                     size={14}
-                    color={item.isComplete ? Colors.slate400 : Colors.warning}
+                    color={item.isComplete ? themeColors.textSecondary : Colors.warning}
                   />
                 </View>
               </TouchableOpacity>
@@ -325,12 +350,12 @@ export const EmergencyPlanSection: React.FC<EmergencyPlanSectionProps> = ({
       {/* ==================================================================== */}
       {/* Short Safety Notice Banner                                           */}
       {/* ==================================================================== */}
-      <View style={styles.safetyNoticeCard}>
+      <View style={[styles.safetyNoticeCard, { backgroundColor: themeColors.cardNavyBackground, borderColor: themeColors.cardBorder }]}>
         <Ionicons name="information-circle-outline" size={18} color={Colors.warning} />
         <View style={styles.safetyNoticeTextGroup}>
           <Text style={styles.safetyNoticeTitle}>DEMO SAFETY NOTICE</Text>
-          <Text style={styles.safetyNoticeBody}>
-            This app is currently a UI demo and does not contact emergency services (e.g., 911) or send live SMS/call alerts.
+          <Text style={[styles.safetyNoticeBody, { color: themeColors.textSecondary }]}>
+            This app is currently a UI demo and does not contact emergency services (National Emergency: 112 / Police: 100) or send live SMS/call alerts.
           </Text>
         </View>
       </View>

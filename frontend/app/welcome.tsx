@@ -78,7 +78,7 @@ export default function WelcomeScreen() {
           <View style={styles.noticeTextCol}>
             <Text style={styles.noticeTitle}>IMPORTANT SAFETY DEMO NOTICE</Text>
             <Text style={styles.noticeBody}>
-              This application is currently a <Text style={styles.boldText}>device-only UI demo</Text>. It does <Text style={styles.boldText}>NOT</Text> dial 911, contact real emergency services, send SMS broadcasts, place calls, or track location in the background.
+              This application is currently a <Text style={styles.boldText}>device-only UI demo</Text>. It does <Text style={styles.boldText}>NOT</Text> dial emergency helplines (112 / Police: 100), contact real emergency services, send SMS broadcasts, place calls, or track location in the background.
             </Text>
           </View>
         </View>

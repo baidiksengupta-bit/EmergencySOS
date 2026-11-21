@@ -34,7 +34,7 @@ const FILTER_OPTIONS: { label: string; value: StatusFilterOption }[] = [
 ];
 
 export default function HistoryScreen() {
-  const { history, clearHistory, refreshHistory } = useSOS();
+  const { history, clearHistory, refreshHistory, themeColors } = useSOS();
 
   const [backendStatus, setBackendStatus] = useState<'connected' | 'offline' | 'checking'>('checking');
   const [isLoading, setIsLoading] = useState(false);
@@ -152,8 +152,8 @@ export default function HistoryScreen() {
   };
 
   return (
-    <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
-      <StatusBar barStyle="light-content" />
+    <SafeAreaView edges={['top', 'left', 'right']} style={[styles.container, { backgroundColor: themeColors.background }]}>
+      <StatusBar barStyle={themeColors.statusBarStyle} />
 
       <Header
         title="Alert History"
@@ -177,7 +177,7 @@ export default function HistoryScreen() {
 
       <View style={styles.content}>
         {/* Backend Synchronization & Offline Indicator */}
-        <View style={styles.syncStatusBar}>
+        <View style={[styles.syncStatusBar, { backgroundColor: themeColors.cardNavyBackground, borderColor: themeColors.cardBorder }]}>
           <View style={styles.syncStatusLeft}>
             <View
               style={[
@@ -189,7 +189,7 @@ export default function HistoryScreen() {
                   : styles.syncDotOffline,
               ]}
             />
-            <Text style={styles.syncStatusText} numberOfLines={1}>
+            <Text style={[styles.syncStatusText, { color: themeColors.textPrimary }]} numberOfLines={1}>
               {backendStatus === 'connected'
                 ? 'FastAPI Backend Synced'
                 : backendStatus === 'checking'
@@ -199,25 +199,25 @@ export default function HistoryScreen() {
           </View>
           <TouchableOpacity
             onPress={() => loadHistory(true, selectedFilter)}
-            style={styles.syncRefreshBtn}
+            style={[styles.syncRefreshBtn, { backgroundColor: themeColors.isDark ? Colors.navy[700] : '#E2E8F0' }]}
             disabled={isLoading || isRefreshing}
             accessible={true}
             accessibilityRole="button"
             accessibilityLabel="Refresh alert history from backend"
           >
             {isLoading && !isRefreshing ? (
-              <ActivityIndicator size="small" color={Colors.white} />
+              <ActivityIndicator size="small" color={themeColors.textPrimary} />
             ) : (
               <View style={styles.syncRefreshRow}>
                 <Ionicons
                   name={backendStatus === 'connected' ? 'refresh-outline' : 'cloud-offline-outline'}
                   size={14}
-                  color={backendStatus === 'connected' ? Colors.emergency.light : Colors.warning}
+                  color={backendStatus === 'connected' ? themeColors.emergencyPrimary : Colors.warning}
                 />
                 <Text
                   style={[
                     styles.syncRefreshText,
-                    backendStatus === 'offline' && { color: Colors.warning },
+                    { color: backendStatus === 'connected' ? themeColors.emergencyPrimary : Colors.warning },
                   ]}
                 >
                   {backendStatus === 'connected' ? 'Refresh' : 'Retry'}
@@ -256,7 +256,7 @@ export default function HistoryScreen() {
           <View style={styles.privacyTextCol}>
             <Text style={styles.privacyBannerTitle}>INCIDENT TELEMETRY & AUDIT TRAIL</Text>
             <Text style={styles.privacyBannerSub}>
-              Alerts recorded locally and backed by your FastAPI backend service. Real emergency dispatches and live 911 calls are disabled.
+              Alerts recorded locally and backed by your FastAPI backend service. Real emergency dispatches and live emergency calls (112 / 100) are disabled.
             </Text>
           </View>
         </View>

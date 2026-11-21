@@ -1,10 +1,12 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { Alert, Linking, Share } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Location from 'expo-location';
 import {
   SOSAlert,
   EmergencyContact,
   EmergencyHistoryItem,
+  BreadcrumbPoint,
   LocationCoordinates,
   NotificationDeliveryReport,
   LocationStatus,
@@ -16,6 +18,7 @@ import {
 } from '../types';
 import { apiService } from '../services/api';
 import { locationService } from '../services/location';
+import { THEME_PALETTES, ThemeColors } from '../constants/Colors';
 
 interface SOSContextType {
   activeAlert: SOSAlert | null;
@@ -23,10 +26,12 @@ interface SOSContextType {
   countdown: number;
   isLoading: boolean;
   currentLocation: LocationCoordinates | null;
+  breadcrumbs: BreadcrumbPoint[];
   contacts: EmergencyContact[];
   history: EmergencyHistoryItem[];
   profile: LocalUserProfile;
   settings: LocalAppSettings;
+  themeColors: ThemeColors;
   locationPermission: 'granted' | 'denied' | 'undetermined' | 'checking';
   refreshPermissionStatus: () => Promise<'granted' | 'denied' | 'undetermined'>;
   emergencyPlanStatus: EmergencyPlanStatus;
@@ -75,7 +80,7 @@ const DEFAULT_SETTINGS: LocalAppSettings = {
   countdown_seconds: 5,
   vibrate_enabled: true,
   sound_alarm_enabled: true,
-  theme: 'navy',
+  theme: 'midnight_navy',
   custom_emergency_message:
     '🚨 EMERGENCY SOS: I need urgent assistance! My coordinates and health profile are attached.',
 };
@@ -110,9 +115,9 @@ const INITIAL_CONTACTS: EmergencyContact[] = [
   },
   {
     id: 4,
-    name: 'Local Emergency Dispatch',
-    phone_number: '911',
-    relationship_label: 'First Responders',
+    name: 'National Emergency Helpline',
+    phone_number: '112',
+    relationship_label: 'Police: 100 / Emergency: 112',
     is_primary: false,
     avatar_color: '#DC2626',
   },
@@ -141,6 +146,7 @@ export const SOSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [countdown, setCountdown] = useState(5);
   const [isLoading, setIsLoading] = useState(false);
   const [currentLocation, setCurrentLocation] = useState<LocationCoordinates | null>(null);
+  const [breadcrumbs, setBreadcrumbs] = useState<BreadcrumbPoint[]>([]);
   const [contacts, setContacts] = useState<EmergencyContact[]>([]);
   const [history, setHistory] = useState<EmergencyHistoryItem[]>([]);
   const [profile, setProfile] = useState<LocalUserProfile>(DEFAULT_PROFILE);
@@ -149,10 +155,11 @@ export const SOSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     'granted' | 'denied' | 'undetermined' | 'checking'
   >('checking');
 
-  // Timers
+  // Timers & Subscription references
   const countdownTimerRef = useRef<any>(null);
   const periodicTelemetryRef = useRef<any>(null);
   const elapsedTimerRef = useRef<any>(null);
+  const locationSubscriptionRef = useRef<Location.LocationSubscription | null>(null);
 
   const refreshPermissionStatus = async (): Promise<'granted' | 'denied' | 'undetermined'> => {
     try {
@@ -243,6 +250,11 @@ export const SOSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               [0, 3, 5, 10, 15].includes(parsed.countdown_seconds) &&
               typeof parsed.vibrate_enabled === 'boolean'
             ) {
+              // Safely migrate legacy theme keys to midnight_navy by default
+              if (parsed.theme && parsed.theme !== 'light_white' && parsed.theme !== 'midnight_navy') {
+                parsed.theme = 'midnight_navy';
+                await AsyncStorage.setItem(STORAGE_SETTINGS, JSON.stringify(parsed));
+              }
               setSettings(parsed);
             } else {
               setSettings(DEFAULT_SETTINGS);
@@ -312,6 +324,15 @@ export const SOSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const progressPercent = Math.round((completedCount / totalCount) * 100);
   const isReady = completedCount === totalCount;
 
+  // Active theme calculation - exactly two supported themes: light_white & midnight_navy
+  const getThemePalette = (t?: string): ThemeColors => {
+    if (t === 'light_white' || t === 'light') return THEME_PALETTES.light_white;
+    // Migrate any legacy or undefined theme key safely to midnight_navy
+    return THEME_PALETTES.midnight_navy;
+  };
+
+  const themeColors = getThemePalette(settings.theme);
+
   const emergencyPlanStatus: EmergencyPlanStatus = {
     isProfileComplete,
     isContactsComplete,
@@ -360,18 +381,132 @@ export const SOSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // ============================================================================
-  // Step 5: Start & Stop Periodic Location Telemetry
+  // Step 5: Start & Stop Periodic Location Telemetry & Live WatchPosition
   // ============================================================================
-  const startPeriodicTelemetry = (alertId: number) => {
+  const startPeriodicTelemetry = async (alertId: number) => {
     stopPeriodicTelemetry();
 
-    // 1. Telemetry streaming breadcrumb interval (every 7 seconds)
+    // 1. Initial breadcrumb at trigger point
+    const initialLoc = currentLocation || (await locationService.getCurrentLocation());
+    const initialBreadcrumb: BreadcrumbPoint = {
+      alert_id: alertId,
+      latitude: initialLoc.latitude,
+      longitude: initialLoc.longitude,
+      accuracy: initialLoc.accuracy,
+      speed: initialLoc.speed,
+      heading: initialLoc.heading,
+      timestamp: new Date().toISOString(),
+    };
+    setBreadcrumbs([initialBreadcrumb]);
+
+    // Send initial point
+    apiService
+      .sendLocationBreadcrumb({
+        alert_id: alertId,
+        latitude: initialLoc.latitude,
+        longitude: initialLoc.longitude,
+        accuracy: initialLoc.accuracy || undefined,
+        speed: initialLoc.speed || 0,
+        heading: initialLoc.heading || 0,
+      })
+      .catch((err) => console.log('Initial breadcrumb upload failed:', err));
+
+    // 2. Start Location.watchPositionAsync for real-time live GPS tracking
+    try {
+      const hasPerm = await locationService.getPermissionStatus();
+      if (hasPerm === 'granted') {
+        const sub = await Location.watchPositionAsync(
+          {
+            accuracy: Location.Accuracy.High,
+            timeInterval: 10000, // 10 seconds interval
+            distanceInterval: 10, // 10 meters distance
+          },
+          (newLocation) => {
+            const point: BreadcrumbPoint = {
+              alert_id: alertId,
+              latitude: newLocation.coords.latitude,
+              longitude: newLocation.coords.longitude,
+              accuracy: newLocation.coords.accuracy,
+              speed: newLocation.coords.speed,
+              heading: newLocation.coords.heading,
+              timestamp: new Date(newLocation.timestamp).toISOString(),
+            };
+
+            // Append to local live trail
+            setBreadcrumbs((prev) => [...prev, point]);
+
+            // Update current location fix
+            setCurrentLocation({
+              latitude: newLocation.coords.latitude,
+              longitude: newLocation.coords.longitude,
+              accuracy: newLocation.coords.accuracy,
+              speed: newLocation.coords.speed,
+              heading: newLocation.coords.heading,
+              timestamp: newLocation.timestamp,
+              status: 'ACCURATE',
+            });
+
+            // POST breadcrumb to backend
+            apiService
+              .sendLocationBreadcrumb({
+                alert_id: alertId,
+                latitude: newLocation.coords.latitude,
+                longitude: newLocation.coords.longitude,
+                accuracy: newLocation.coords.accuracy || undefined,
+                speed: newLocation.coords.speed || 0,
+                heading: newLocation.coords.heading || 0,
+              })
+              .catch((err) => console.log('Live breadcrumb stream upload:', err));
+
+            // Update alert metadata
+            setActiveAlert((prev) => {
+              if (!prev) return null;
+              return {
+                ...prev,
+                latitude: newLocation.coords.latitude,
+                longitude: newLocation.coords.longitude,
+                accuracy: newLocation.coords.accuracy || prev.accuracy,
+                breadcrumbs_count: (prev.breadcrumbs_count || 0) + 1,
+              };
+            });
+          }
+        );
+        locationSubscriptionRef.current = sub;
+      }
+    } catch (watchErr) {
+      console.warn('watchPositionAsync subscription error:', watchErr);
+    }
+
+    // 3. Fallback interval if watchPosition is throttled or hardware stationary
     periodicTelemetryRef.current = setInterval(async () => {
       try {
         const loc = await locationService.getCurrentLocation();
         setCurrentLocation(loc);
 
-        // Ping backend breadcrumb
+        // Ping backend breadcrumb if subscription didn't already
+        const pingPoint: BreadcrumbPoint = {
+          alert_id: alertId,
+          latitude: loc.latitude,
+          longitude: loc.longitude,
+          accuracy: loc.accuracy,
+          speed: loc.speed,
+          heading: loc.heading,
+          timestamp: new Date().toISOString(),
+        };
+
+        setBreadcrumbs((prev) => {
+          // Avoid duplicate points within 2 meters
+          const last = prev[prev.length - 1];
+          if (
+            last &&
+            Math.abs(last.latitude - loc.latitude) < 0.00003 &&
+            Math.abs(last.longitude - loc.longitude) < 0.00003
+          ) {
+            return prev;
+          }
+          return [...prev, pingPoint];
+        });
+
         await apiService.sendLocationBreadcrumb({
           alert_id: alertId,
           latitude: loc.latitude,
@@ -392,12 +527,11 @@ export const SOSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           };
         });
       } catch (err) {
-        // Silently continue in background
         console.log('Telemetry ping interval error:', err);
       }
-    }, 7000);
+    }, 12000);
 
-    // 2. Elapsed active seconds counter (every 1 second)
+    // 4. Elapsed active seconds counter (every 1 second)
     elapsedTimerRef.current = setInterval(() => {
       setActiveAlert((prev) => {
         if (!prev) return null;
@@ -410,6 +544,16 @@ export const SOSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const stopPeriodicTelemetry = () => {
+    // Cleanly remove Expo location subscription immediately
+    if (locationSubscriptionRef.current) {
+      try {
+        locationSubscriptionRef.current.remove();
+      } catch (e) {
+        console.warn('Error removing location subscription:', e);
+      }
+      locationSubscriptionRef.current = null;
+    }
+
     if (periodicTelemetryRef.current) {
       clearInterval(periodicTelemetryRef.current);
       periodicTelemetryRef.current = null;
@@ -641,6 +785,7 @@ export const SOSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await AsyncStorage.setItem(STORAGE_HISTORY, JSON.stringify(updatedHistory));
       await AsyncStorage.removeItem(STORAGE_ACTIVE_ALERT);
       setActiveAlert(null);
+      setBreadcrumbs([]);
 
       Alert.alert(
         'Emergency Alert Cancelled',
@@ -872,10 +1017,12 @@ export const SOSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         countdown,
         isLoading,
         currentLocation,
+        breadcrumbs,
         contacts,
         history,
         profile,
         settings,
+        themeColors,
         locationPermission,
         refreshPermissionStatus,
         emergencyPlanStatus,

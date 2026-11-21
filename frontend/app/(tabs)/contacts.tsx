@@ -20,6 +20,7 @@ import { Badge } from '../../src/components/common/Badge';
 import { Input } from '../../src/components/common/Input';
 import { Button } from '../../src/components/common/Button';
 import { useSOS } from '../../src/context/SOSContext';
+import { useAuth } from '../../src/context/AuthContext';
 import { EmergencyContact, ContactPriority } from '../../src/types';
 import { apiService } from '../../src/services/api';
 import { Ionicons } from '@expo/vector-icons';
@@ -43,16 +44,21 @@ const PRIORITY_OPTIONS: { label: string; value: ContactPriority; desc: string }[
 ];
 
 export default function ContactsScreen() {
-  const { contacts, addContact, updateContact, deleteContact } = useSOS();
+  const { contacts, addContact, updateContact, deleteContact, themeColors } = useSOS();
+  const { user, isAuthenticated, isDemoMode } = useAuth();
 
   const [modalVisible, setModalVisible] = useState(false);
   const [editingContact, setEditingContact] = useState<EmergencyContact | null>(null);
 
-  // Backend Sync State
+  // Backend Sync & Session State
   const [backendContacts, setBackendContacts] = useState<EmergencyContact[] | null>(null);
   const [backendStatus, setBackendStatus] = useState<'connected' | 'offline' | 'checking'>('checking');
+  const [lastHttpError, setLastHttpError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Derived connection state
+  const isBackendConnected = backendStatus === 'connected';
 
   // Form State
   const [name, setName] = useState('');
@@ -61,18 +67,87 @@ export default function ContactsScreen() {
   const [priority, setPriority] = useState<ContactPriority>('STANDARD');
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Load contacts from GET /api/v1/contacts/ on mount and focus
-  const fetchBackendContacts = async (showLoading = false) => {
+  /**
+   * Format API / HTTP errors cleanly without hiding the status code
+   */
+  const formatHttpError = (err: any): string => {
+    if (err?.response) {
+      const status = err.response.status;
+      const detail = err.response.data?.detail;
+      let message = '';
+      if (typeof detail === 'string') {
+        message = detail;
+      } else if (Array.isArray(detail)) {
+        message = detail.map((d: any) => d.msg || JSON.stringify(d)).join(', ');
+      } else if (detail) {
+        message = JSON.stringify(detail);
+      } else {
+        message = err.response.statusText || 'Request failed';
+      }
+      return `HTTP ${status}: ${message}`;
+    }
+    if (err?.code === 'ECONNABORTED' || err?.message?.includes('Network Error')) {
+      return 'Network Error: Backend unreachable';
+    }
+    return err?.message || 'Connection error';
+  };
+
+  /**
+   * Load backend contacts and synchronize any local un-synced contacts to the backend
+   */
+  const syncLocalContactsToBackend = async (showLoading = false) => {
     if (showLoading) setIsLoading(true);
     try {
-      const data = await apiService.getContacts(1);
+      const targetUserId = user?.id || 1;
+      const data = await apiService.getContacts(targetUserId);
+
       if (Array.isArray(data)) {
         setBackendContacts(data);
         setBackendStatus('connected');
+        setLastHttpError(null);
+
+        // Sync local contacts to backend upon login or connection retry
+        const existingPhones = new Set(
+          data.map((c) => c.phone_number.replace(/\D/g, ''))
+        );
+        const existingNames = new Set(
+          data.map((c) => c.name.toLowerCase().trim())
+        );
+
+        const unsynced = contacts.filter((local) => {
+          const cleanPhone = local.phone_number.replace(/\D/g, '');
+          const cleanName = local.name.toLowerCase().trim();
+          return !existingPhones.has(cleanPhone) && !existingNames.has(cleanName);
+        });
+
+        if (unsynced.length > 0) {
+          for (const localContact of unsynced) {
+            try {
+              await apiService.createContact({
+                name: localContact.name,
+                phone_number: localContact.phone_number,
+                relationship_label: localContact.relationship_label,
+                is_primary: localContact.is_primary,
+                user_id: targetUserId,
+              });
+            } catch (postErr) {
+              const errStr = formatHttpError(postErr);
+              console.warn(`[Contacts] Local contact sync error for ${localContact.name}:`, errStr);
+              setLastHttpError(errStr);
+            }
+          }
+          // Refresh backend contacts after pushing local entries
+          const refreshed = await apiService.getContacts(targetUserId);
+          if (Array.isArray(refreshed)) {
+            setBackendContacts(refreshed);
+          }
+        }
       }
-    } catch (err) {
-      console.warn('Backend contacts endpoint unreachable, operating in safe offline mode:', err);
+    } catch (err: any) {
+      const errStr = formatHttpError(err);
+      console.warn('Backend contacts endpoint unreachable or returned error:', errStr);
       setBackendStatus('offline');
+      setLastHttpError(errStr);
     } finally {
       setIsLoading(false);
     }
@@ -80,13 +155,14 @@ export default function ContactsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      fetchBackendContacts(false);
-    }, [])
+      syncLocalContactsToBackend(false);
+    }, [isAuthenticated, user?.id])
   );
 
+  // Sync upon login or user change
   useEffect(() => {
-    fetchBackendContacts(true);
-  }, []);
+    syncLocalContactsToBackend(true);
+  }, [isAuthenticated, user?.id]);
 
   // Display priority: backend contacts if loaded and non-empty, otherwise local contacts
   const displayContacts =
@@ -143,7 +219,7 @@ export default function ContactsScreen() {
     const digits = cleanPhone.replace(/\D/g, '');
     if (!phonePattern.test(cleanPhone) || digits.length < 3 || digits.length > 15) {
       setFormError(
-        'Please enter a valid emergency phone number (3 to 15 digits, e.g. +1 555-123-4567 or 911).'
+        'Please enter a valid emergency phone number (3 to 15 digits, e.g. +91 98765-43210, 112, or 100).'
       );
       return false;
     }
@@ -161,12 +237,13 @@ export default function ContactsScreen() {
 
     const isPrimary = priority === 'PRIMARY';
     const contactName = name.trim();
+    const targetUserId = user?.id || 1;
     setIsSubmitting(true);
     setFormError(null);
 
     try {
       if (editingContact) {
-        // Attempt backend update if supported
+        // Attempt backend update
         let updatedOnBackend = false;
         try {
           await apiService.updateContact(editingContact.id, {
@@ -176,8 +253,11 @@ export default function ContactsScreen() {
             is_primary: isPrimary,
           });
           updatedOnBackend = true;
-        } catch (apiErr) {
-          console.warn('Backend updateContact not supported or unreachable:', apiErr);
+          setLastHttpError(null);
+        } catch (apiErr: any) {
+          const errStr = formatHttpError(apiErr);
+          console.warn('Backend updateContact error:', errStr);
+          setLastHttpError(errStr);
         }
 
         // Always update local persistent storage
@@ -200,14 +280,17 @@ export default function ContactsScreen() {
         let createdBackendContact: EmergencyContact | null = null;
         try {
           createdBackendContact = await apiService.createContact({
-            user_id: 1,
+            user_id: targetUserId,
             name: contactName,
             phone_number: phone.trim(),
             relationship_label: relationship,
             is_primary: isPrimary,
           });
-        } catch (apiErr) {
-          console.warn('Backend createContact failed, saving locally:', apiErr);
+          setLastHttpError(null);
+        } catch (apiErr: any) {
+          const errStr = formatHttpError(apiErr);
+          console.warn('Backend createContact failed, saving locally:', errStr);
+          setLastHttpError(errStr);
         }
 
         // Always persist locally in device storage via SOSContext
@@ -228,9 +311,10 @@ export default function ContactsScreen() {
       }
 
       setModalVisible(false);
-      fetchBackendContacts(false);
+      syncLocalContactsToBackend(false);
     } catch (e: any) {
-      setFormError(e?.message || 'Failed to save contact. Please try again.');
+      const errStr = formatHttpError(e);
+      setFormError(errStr);
     } finally {
       setIsSubmitting(false);
     }
@@ -250,8 +334,11 @@ export default function ContactsScreen() {
             try {
               await apiService.deleteContact(contact.id);
               deletedOnBackend = true;
-            } catch (err) {
-              console.warn('Backend delete offline or contact only exists locally:', err);
+              setLastHttpError(null);
+            } catch (err: any) {
+              const errStr = formatHttpError(err);
+              console.warn('Backend delete offline or error:', errStr);
+              setLastHttpError(errStr);
             }
 
             // Always remove from local device storage
@@ -264,7 +351,7 @@ export default function ContactsScreen() {
                 : `${contact.name} was removed from this device.`
             );
 
-            fetchBackendContacts(false);
+            syncLocalContactsToBackend(false);
           },
         },
       ]
@@ -274,11 +361,14 @@ export default function ContactsScreen() {
   const handleSetPrimary = async (item: EmergencyContact) => {
     try {
       await apiService.updateContact(item.id, { is_primary: true });
-    } catch (err) {
-      console.warn('Backend update primary not supported or offline:', err);
+      setLastHttpError(null);
+    } catch (err: any) {
+      const errStr = formatHttpError(err);
+      console.warn('Backend update primary error:', errStr);
+      setLastHttpError(errStr);
     }
     await updateContact(item.id, { priority_level: 'PRIMARY', is_primary: true });
-    fetchBackendContacts(false);
+    syncLocalContactsToBackend(false);
   };
 
   const getPriorityBadgeVariant = (level?: ContactPriority, isPrimary?: boolean) => {
@@ -288,8 +378,8 @@ export default function ContactsScreen() {
   };
 
   return (
-    <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
-      <StatusBar barStyle="light-content" />
+    <SafeAreaView edges={['top', 'left', 'right']} style={[styles.container, { backgroundColor: themeColors.background }]}>
+      <StatusBar barStyle={themeColors.statusBarStyle} />
 
       <Header
         title="Emergency Contacts"
@@ -297,73 +387,79 @@ export default function ContactsScreen() {
           displayContacts.length === 0
             ? 'No Contacts Stored'
             : `${displayContacts.length} Contact${displayContacts.length === 1 ? '' : 's'} ${
-                backendStatus === 'connected' ? 'Synced with Backend' : 'Saved on Device'
+                isBackendConnected ? 'Synced with Backend' : 'Saved on Device'
               }`
         }
         variant="navy"
         showBack={true}
         onBack={() => router.push('/(tabs)/home')}
-        rightAction={
-          displayContacts.length > 0
-            ? {
-                icon: 'person-add',
-                onPress: openAddModal,
-              }
-            : undefined
-        }
       />
 
       <View style={styles.content}>
         {/* Backend Synchronization & Offline Status Bar */}
-        <View style={styles.syncStatusBar}>
+        <View style={[styles.syncStatusBar, { backgroundColor: themeColors.cardNavyBackground, borderColor: themeColors.cardBorder }]}>
           <View style={styles.syncStatusLeft}>
             <View
               style={[
                 styles.syncStatusDot,
-                backendStatus === 'connected'
+                isBackendConnected
                   ? styles.syncDotConnected
                   : backendStatus === 'checking'
                   ? styles.syncDotChecking
                   : styles.syncDotOffline,
               ]}
             />
-            <Text style={styles.syncStatusText} numberOfLines={1}>
-              {backendStatus === 'connected'
-                ? 'FastAPI Backend Synced'
+            <Text style={[styles.syncStatusText, { color: themeColors.textPrimary }]} numberOfLines={1}>
+              {isBackendConnected
+                ? isAuthenticated
+                  ? `FastAPI Backend Synced • ${user?.full_name || 'Authenticated'}`
+                  : 'FastAPI Backend Synced (Demo Mode)'
                 : backendStatus === 'checking'
                 ? 'Connecting to Backend...'
+                : lastHttpError
+                ? `Offline: ${lastHttpError}`
                 : 'Offline Mode • Device Storage Active'}
             </Text>
           </View>
           <TouchableOpacity
-            onPress={() => fetchBackendContacts(true)}
-            style={styles.syncRefreshBtn}
+            onPress={() => syncLocalContactsToBackend(true)}
+            style={[styles.syncRefreshBtn, { backgroundColor: themeColors.isDark ? Colors.navy[700] : '#E2E8F0' }]}
             disabled={isLoading}
             accessible={true}
             accessibilityRole="button"
             accessibilityLabel="Refresh contacts from backend"
           >
             {isLoading ? (
-              <ActivityIndicator size="small" color={Colors.white} />
+              <ActivityIndicator size="small" color={themeColors.textPrimary} />
             ) : (
               <View style={styles.syncRefreshRow}>
                 <Ionicons
-                  name={backendStatus === 'connected' ? 'refresh-outline' : 'cloud-offline-outline'}
+                  name={isBackendConnected ? 'refresh-outline' : 'cloud-offline-outline'}
                   size={14}
-                  color={backendStatus === 'connected' ? Colors.emergency.light : Colors.warning}
+                  color={isBackendConnected ? themeColors.emergencyPrimary : Colors.warning}
                 />
                 <Text
                   style={[
                     styles.syncRefreshText,
-                    backendStatus === 'offline' && { color: Colors.warning },
+                    { color: isBackendConnected ? themeColors.emergencyPrimary : Colors.warning },
                   ]}
                 >
-                  {backendStatus === 'connected' ? 'Refresh' : 'Retry'}
+                  {isBackendConnected ? 'Refresh' : 'Retry'}
                 </Text>
               </View>
             )}
           </TouchableOpacity>
         </View>
+
+        {/* Detailed HTTP Error Banner if error occurred */}
+        {lastHttpError && !isBackendConnected && (
+          <View style={styles.httpErrorBar}>
+            <Ionicons name="alert-circle" size={14} color={Colors.warning} />
+            <Text style={styles.httpErrorText} numberOfLines={2}>
+              {lastHttpError}
+            </Text>
+          </View>
+        )}
 
         {/* Device-Only Privacy Notice */}
         <View style={styles.privacyBanner}>
@@ -414,9 +510,9 @@ export default function ContactsScreen() {
                 {/* Details */}
                 <View style={styles.detailsCol}>
                   <View style={styles.nameRow}>
-                    <Text style={styles.contactName}>{item.name}</Text>
+                    <Text style={[styles.contactName, { color: themeColors.textPrimary }]}>{item.name}</Text>
                   </View>
-                  <Text style={styles.contactRelation}>{item.relationship_label}</Text>
+                  <Text style={[styles.contactRelation, { color: themeColors.textSecondary }]}>{item.relationship_label}</Text>
                 </View>
 
                 {/* Priority Badge */}
@@ -433,9 +529,9 @@ export default function ContactsScreen() {
               </View>
 
               {/* Phone number row */}
-              <View style={styles.phoneBox}>
-                <Ionicons name="call" size={15} color={Colors.emergency.light} />
-                <Text style={styles.phoneText}>{item.phone_number}</Text>
+              <View style={[styles.phoneBox, { backgroundColor: themeColors.isDark ? Colors.navy[900] : '#E2E8F0', borderColor: themeColors.cardBorderSubtle }]}>
+                <Ionicons name="call" size={15} color={themeColors.emergencyPrimary} />
+                <Text style={[styles.phoneText, { color: themeColors.textPrimary }]}>{item.phone_number}</Text>
               </View>
 
               {/* Card Footer Actions */}
@@ -571,7 +667,7 @@ export default function ContactsScreen() {
                 {/* 2. Phone */}
                 <Input
                   label="Emergency Phone Number *"
-                  placeholder="e.g. +1 (555) 234-5678 or 911"
+                  placeholder="e.g. +91 98765-43210, 112, or 100"
                   icon="call-outline"
                   keyboardType="phone-pad"
                   value={phone}
@@ -1104,6 +1200,25 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: Colors.emergency.light,
+  },
+  httpErrorBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.3)',
+    gap: 8,
+  },
+  httpErrorText: {
+    fontSize: 11,
+    color: Colors.warning,
+    flex: 1,
+    fontWeight: '700',
+    lineHeight: 15,
   },
 
   modalActions: {

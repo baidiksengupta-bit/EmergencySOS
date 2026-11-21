@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Colors } from '../../constants/Colors';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import { useSOS } from '../../context/SOSContext';
 
 interface HeaderProps {
   title: string;
@@ -24,6 +25,7 @@ export const Header: React.FC<HeaderProps> = ({
   rightAction,
   variant = 'navy',
 }) => {
+  const { themeColors } = useSOS();
   const isNavy = variant === 'navy';
 
   const handleBackPress = () => {
@@ -37,13 +39,25 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <View style={[styles.container, isNavy ? styles.navyContainer : styles.whiteContainer]}>
+    <View
+      style={[
+        styles.container,
+        isNavy
+          ? [styles.navyContainer, { backgroundColor: themeColors.headerBackground, borderBottomColor: themeColors.cardBorderSubtle }]
+          : styles.whiteContainer,
+      ]}
+    >
       <View style={styles.topRow}>
         <View style={styles.leftGroup}>
           {showBack && (
             <TouchableOpacity
               onPress={handleBackPress}
-              style={[styles.backBtn, isNavy ? styles.backBtnNavy : styles.backBtnWhite]}
+              style={[
+                styles.backBtn,
+                isNavy
+                  ? [styles.backBtnNavy, { backgroundColor: themeColors.cardNavyBackground, borderColor: themeColors.cardBorder }]
+                  : styles.backBtnWhite,
+              ]}
               accessible={true}
               accessibilityRole="button"
               accessibilityLabel="Back to Home"
@@ -52,16 +66,30 @@ export const Header: React.FC<HeaderProps> = ({
               <Ionicons
                 name="arrow-back"
                 size={22}
-                color={isNavy ? Colors.white : Colors.navy[900]}
+                color={isNavy ? themeColors.textPrimary : Colors.navy[900]}
               />
             </TouchableOpacity>
           )}
           <View>
-            <Text style={[styles.title, isNavy ? styles.titleNavy : styles.titleWhite]}>
+            <Text
+              style={[
+                styles.title,
+                isNavy
+                  ? [styles.titleNavy, { color: themeColors.textPrimary }]
+                  : styles.titleWhite,
+              ]}
+            >
               {title}
             </Text>
             {subtitle && (
-              <Text style={[styles.subtitle, isNavy ? styles.subtitleNavy : styles.subtitleWhite]}>
+              <Text
+                style={[
+                  styles.subtitle,
+                  isNavy
+                    ? [styles.subtitleNavy, { color: themeColors.textSecondary }]
+                    : styles.subtitleWhite,
+                ]}
+              >
                 {subtitle}
               </Text>
             )}
@@ -71,12 +99,17 @@ export const Header: React.FC<HeaderProps> = ({
         {rightAction && (
           <TouchableOpacity
             onPress={rightAction.onPress}
-            style={[styles.rightBtn, isNavy ? styles.rightBtnNavy : styles.rightBtnWhite]}
+            style={[
+              styles.rightBtn,
+              isNavy
+                ? [styles.rightBtnNavy, { backgroundColor: themeColors.cardNavyBackground, borderColor: themeColors.cardBorder }]
+                : styles.rightBtnWhite,
+            ]}
           >
             <Ionicons
               name={rightAction.icon}
               size={22}
-              color={isNavy ? Colors.white : Colors.navy[900]}
+              color={isNavy ? themeColors.textPrimary : Colors.navy[900]}
             />
           </TouchableOpacity>
         )}

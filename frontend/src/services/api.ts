@@ -6,6 +6,7 @@
  */
 
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Config } from '../constants/Config';
 import { EmergencyContact, SOSAlert, AlertStatus } from '../types';
 
@@ -89,9 +90,68 @@ export interface AuthTokenResponse {
   user: AuthUserResponse;
 }
 
+export interface BreadcrumbPayload {
+  alert_id: number;
+  latitude: number;
+  longitude: number;
+  accuracy?: number;
+  speed?: number;
+  heading?: number;
+}
+
+export interface BreadcrumbResponseItem {
+  id: number;
+  alert_id: number;
+  latitude: number;
+  longitude: number;
+  accuracy?: number;
+  speed?: number;
+  heading?: number;
+  recorded_at: string;
+}
+
+export interface NearbyEmergencyService {
+  id: string;
+  name: string;
+  category: 'police' | 'hospital';
+  latitude: number;
+  longitude: number;
+  distance_km: number;
+  address?: string | null;
+}
+
+/**
+ * Normalizes any provided API base URL:
+ * - Strips trailing whitespace and trailing slashes.
+ * - Safely removes any trailing /api/v1 (or /api/v1/) to avoid double concatenation.
+ * - Appends a single canonical /api/v1 prefix.
+ *
+ * Examples:
+ * - "http://localhost:8000" -> "http://localhost:8000/api/v1"
+ * - "http://localhost:8000/" -> "http://localhost:8000/api/v1"
+ * - "http://localhost:8000/api/v1" -> "http://localhost:8000/api/v1"
+ * - "https://inform-influenced-cpu-allan.trycloudflare.com/api/v1" -> "https://inform-influenced-cpu-allan.trycloudflare.com/api/v1"
+ */
+export function normalizeApiBaseUrl(rawUrl?: string): string {
+  const fallback = 'http://192.168.0.127:8000';
+  let url = (rawUrl && rawUrl.trim()) ? rawUrl.trim() : fallback;
+  // Remove any trailing slashes
+  url = url.replace(/\/+$/, '');
+  // If it already ends with /api/v1, strip it first so we have a clean root base
+  if (url.toLowerCase().endsWith('/api/v1')) {
+    url = url.slice(0, -'/api/v1'.length);
+  }
+  // Remove any trailing slashes again
+  url = url.replace(/\/+$/, '');
+  // Append a single canonical /api/v1
+  return `${url}/api/v1`;
+}
+
+export const API_BASE_URL = normalizeApiBaseUrl(Config.API_BASE_URL);
+
 // 1. Create a configured Axios instance
 export const apiClient = axios.create({
-  baseURL: Config.API_BASE_URL,
+  baseURL: API_BASE_URL,
   timeout: Config.DEFAULT_TIMEOUT_MS, // 5000ms reasonable timeout
   headers: {
     'Content-Type': 'application/json',
@@ -100,6 +160,41 @@ export const apiClient = axios.create({
 
 // Centralized auth token memory state
 let currentAuthToken: string | null = null;
+
+const SECURE_STORE_TOKEN_KEY = 'auth_token';
+const ASYNC_STORE_TOKEN_KEY = '@emergency_sos_auth_token';
+
+/**
+ * Helper to fetch token from SecureStore or AsyncStorage
+ */
+export const getPersistentAuthToken = async (): Promise<string | null> => {
+  if (currentAuthToken) return currentAuthToken;
+  try {
+    // 1. Check Expo SecureStore if installed/available in environment
+    try {
+      // Dynamic require so missing module never causes a bundle or runtime crash
+      const SecureStore = require('expo-secure-store');
+      if (SecureStore && typeof SecureStore.getItemAsync === 'function') {
+        const secureToken = await SecureStore.getItemAsync(SECURE_STORE_TOKEN_KEY);
+        if (secureToken) {
+          currentAuthToken = secureToken;
+          return secureToken;
+        }
+      }
+    } catch (_) {}
+
+    // 2. Persistent AsyncStorage fallback
+    const asyncToken = await AsyncStorage.getItem(ASYNC_STORE_TOKEN_KEY);
+    if (asyncToken) {
+      currentAuthToken = asyncToken;
+      return asyncToken;
+    }
+    return null;
+  } catch (err) {
+    console.warn('[apiClient] Failed to retrieve persisted token:', err);
+    return null;
+  }
+};
 
 /**
  * Configure or clear the active Bearer authentication token for all apiClient requests.
@@ -114,12 +209,26 @@ export const setAuthToken = (token: string | null) => {
 };
 
 /**
- * Request Interceptor: Ensures Authorization header is dynamically attached if present.
+ * Request Interceptor:
+ * 1. Sanitizes request URL: strips any duplicate `/api/v1` prefix so URLs work seamlessly
+ *    whether callers pass `/contacts/`, `/api/v1/contacts/`, or `contacts/`.
+ * 2. Ensures Authorization header is dynamically attached from memory or SecureStore/AsyncStorage on all requests.
  */
 apiClient.interceptors.request.use(
-  (config: InternalAxiosRequestConfig) => {
-    if (currentAuthToken && !config.headers.Authorization) {
-      config.headers.Authorization = `Bearer ${currentAuthToken}`;
+  async (config: InternalAxiosRequestConfig) => {
+    // Strip duplicate /api/v1 prefix if present in request url
+    if (config.url) {
+      config.url = config.url.replace(/^\/?api\/v1(\/|$)/i, '/');
+      if (!config.url.startsWith('/')) {
+        config.url = `/${config.url}`;
+      }
+    }
+
+    if (!config.headers.Authorization) {
+      const token = currentAuthToken || (await getPersistentAuthToken());
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
     }
     return config;
   },
@@ -142,7 +251,7 @@ apiClient.interceptors.response.use(
 // 2. Centralized API methods
 export const apiService = {
   /**
-   * Health Check: Calls GET /health on the backend
+   * Health Check: Calls GET /api/v1/health on the backend
    * Returns: { status: 'ok', service: 'EmergencySOS Backend' }
    */
   checkHealth: async (): Promise<HealthCheckResponse> => {
@@ -165,7 +274,7 @@ export const apiService = {
    * Returns AlertResponse (SOSAlert)
    */
   triggerSOS: async (payload: AlertCreatePayload): Promise<SOSAlert> => {
-    const response = await apiClient.post<SOSAlert>('/api/v1/sos/trigger', payload);
+    const response = await apiClient.post<SOSAlert>('/sos/trigger', payload);
     return response.data;
   },
 
@@ -175,7 +284,7 @@ export const apiService = {
    * Returns Optional[AlertResponse]
    */
   getActiveAlert: async (userId?: number): Promise<SOSAlert | null> => {
-    const response = await apiClient.get<SOSAlert | null>(`/api/v1/sos/active`, {
+    const response = await apiClient.get<SOSAlert | null>(`/sos/active`, {
       params: userId ? { user_id: userId } : undefined,
     });
     return response.data;
@@ -191,7 +300,7 @@ export const apiService = {
     payload?: AlertCancelPayload
   ): Promise<SOSAlert> => {
     const response = await apiClient.patch<SOSAlert>(
-      `/api/v1/sos/${alertId}/cancel`,
+      `/sos/${alertId}/cancel`,
       payload || { reason: 'Cancelled by user' }
     );
     return response.data;
@@ -217,7 +326,7 @@ export const apiService = {
    * Returns List[AlertResponse] (SOSAlert[])
    */
   getHistory: async (params?: HistoryQueryParams): Promise<SOSAlert[]> => {
-    const response = await apiClient.get<SOSAlert[]>('/api/v1/sos/history', {
+    const response = await apiClient.get<SOSAlert[]>('/sos/history', {
       params: {
         user_id: params?.user_id ?? 1,
         ...(params?.status_filter ? { status_filter: params.status_filter } : {}),
@@ -233,7 +342,7 @@ export const apiService = {
    * Returns List[ContactResponse] (EmergencyContact[])
    */
   getContacts: async (userId?: number): Promise<EmergencyContact[]> => {
-    const response = await apiClient.get<EmergencyContact[]>('/api/v1/contacts/', {
+    const response = await apiClient.get<EmergencyContact[]>('/contacts/', {
       params: userId ? { user_id: userId } : undefined,
     });
     return response.data;
@@ -243,7 +352,7 @@ export const apiService = {
    * List emergency contacts by user ID: Calls GET /api/v1/contacts/user/{user_id}
    */
   getContactsByUser: async (userId: number): Promise<EmergencyContact[]> => {
-    const response = await apiClient.get<EmergencyContact[]>(`/api/v1/contacts/user/${userId}`);
+    const response = await apiClient.get<EmergencyContact[]>(`/contacts/user/${userId}`);
     return response.data;
   },
 
@@ -253,7 +362,7 @@ export const apiService = {
    * Returns ContactResponse (EmergencyContact)
    */
   createContact: async (contact: ContactCreatePayload): Promise<EmergencyContact> => {
-    const response = await apiClient.post<EmergencyContact>('/api/v1/contacts/', {
+    const response = await apiClient.post<EmergencyContact>('/contacts/', {
       relationship_label: 'Family',
       is_primary: false,
       ...contact,
@@ -262,7 +371,7 @@ export const apiService = {
   },
 
   /**
-   * Update emergency contact: Calls PATCH /api/v1/contacts/{contact_id} (if supported by backend)
+   * Update emergency contact: Calls PATCH /api/v1/contacts/{contact_id}
    * Request body matches backend ContactUpdate schema
    * Returns ContactResponse (EmergencyContact)
    */
@@ -271,7 +380,7 @@ export const apiService = {
     contact: ContactUpdatePayload
   ): Promise<EmergencyContact> => {
     const response = await apiClient.patch<EmergencyContact>(
-      `/api/v1/contacts/${contactId}`,
+      `/contacts/${contactId}`,
       contact
     );
     return response.data;
@@ -283,22 +392,51 @@ export const apiService = {
    */
   deleteContact: async (contactId: number): Promise<{ message: string; id: number }> => {
     const response = await apiClient.delete<{ message: string; id: number }>(
-      `/api/v1/contacts/${contactId}`
+      `/contacts/${contactId}`
     );
     return response.data;
   },
 
   // Telemetry Breadcrumb
-  sendLocationBreadcrumb: async (breadcrumb: {
-    alert_id: number;
-    latitude: number;
-    longitude: number;
-    accuracy?: number;
-    speed?: number;
-    heading?: number;
-  }) => {
-    const response = await apiClient.post('/api/v1/location/breadcrumb', breadcrumb);
-    return response.data;
+  sendLocationBreadcrumb: async (
+    breadcrumb: BreadcrumbPayload
+  ): Promise<BreadcrumbResponseItem> => {
+    try {
+      const response = await apiClient.post<BreadcrumbResponseItem>(
+        '/location/breadcrumb',
+        breadcrumb
+      );
+      return response.data;
+    } catch (err) {
+      console.warn('[apiService] Breadcrumb upload offline/failed, using local fallback item:', err);
+      return {
+        id: Date.now(),
+        alert_id: breadcrumb.alert_id,
+        latitude: breadcrumb.latitude,
+        longitude: breadcrumb.longitude,
+        accuracy: breadcrumb.accuracy,
+        speed: breadcrumb.speed,
+        heading: breadcrumb.heading,
+        recorded_at: new Date().toISOString(),
+      };
+    }
+  },
+
+  /**
+   * Fetch GPS breadcrumbs for an active or past alert
+   * Calls GET /api/v1/location/alert/{alert_id}/breadcrumbs
+   * Returns BreadcrumbResponseItem[] with safe offline fallback
+   */
+  getAlertBreadcrumbs: async (alertId: number): Promise<BreadcrumbResponseItem[]> => {
+    try {
+      const response = await apiClient.get<BreadcrumbResponseItem[]>(
+        `/location/alert/${alertId}/breadcrumbs`
+      );
+      return response.data;
+    } catch (err) {
+      console.warn(`[apiService] Fetch breadcrumbs for alert #${alertId} failed or offline:`, err);
+      return [];
+    }
   },
 
   // Authentication operations
@@ -307,7 +445,7 @@ export const apiService = {
    * Returns AuthTokenResponse with access_token and user profile
    */
   registerUser: async (payload: AuthRegisterPayload): Promise<AuthTokenResponse> => {
-    const response = await apiClient.post<AuthTokenResponse>('/api/v1/auth/register', payload);
+    const response = await apiClient.post<AuthTokenResponse>('/auth/register', payload);
     return response.data;
   },
 
@@ -316,7 +454,7 @@ export const apiService = {
    * Returns AuthTokenResponse with access_token and user profile
    */
   loginUser: async (payload: AuthLoginPayload): Promise<AuthTokenResponse> => {
-    const response = await apiClient.post<AuthTokenResponse>('/api/v1/auth/login', payload);
+    const response = await apiClient.post<AuthTokenResponse>('/auth/login', payload);
     return response.data;
   },
 
@@ -325,7 +463,41 @@ export const apiService = {
    * Requires Bearer token
    */
   getCurrentUser: async (): Promise<AuthUserResponse> => {
-    const response = await apiClient.get<AuthUserResponse>('/api/v1/auth/me');
+    const response = await apiClient.get<AuthUserResponse>('/auth/me');
     return response.data;
+  },
+
+  /**
+   * Discover nearby Police Stations and Hospitals
+   * Calls GET /api/v1/location/nearby-services?lat={lat}&lng={lng}&radius_m={radius_m}
+   * If backend is offline or unreachable, falls back to direct OpenStreetMap Overpass API
+   * using the user's real GPS coordinates. Never returns hardcoded fake addresses.
+   */
+  getNearbyServices: async (
+    lat: number,
+    lng: number,
+    radiusM: number = 3000
+  ): Promise<NearbyEmergencyService[]> => {
+    try {
+      const response = await apiClient.get<NearbyEmergencyService[]>('/location/nearby-services', {
+        params: {
+          lat,
+          lng,
+          radius_m: radiusM,
+        },
+      });
+      return response.data;
+    } catch (err) {
+      console.warn('[apiService] Backend nearby-services query unreachable, querying Overpass directly with real GPS:', err);
+      // Query real OpenStreetMap Overpass API directly from client
+      try {
+        const { locationService } = require('./location');
+        const realServices = await locationService.fetchNearbyServicesFromOverpass(lat, lng, radiusM);
+        return realServices;
+      } catch (overpassErr) {
+        console.warn('[apiService] Direct Overpass query also failed:', overpassErr);
+        return [];
+      }
+    }
   },
 };

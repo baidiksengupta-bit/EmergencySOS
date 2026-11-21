@@ -35,29 +35,25 @@ const COUNTDOWN_DURATIONS: { label: string; value: CountdownDuration }[] = [
 const DEFAULT_MESSAGE =
   'EMERGENCY SOS: I need immediate assistance! My current location is attached.';
 
-const THEME_OPTIONS: {
+export interface ThemeOption {
   id: AppTheme;
   label: string;
   description: string;
   previewColors: [string, string];
-}[] = [
+}
+
+const THEME_OPTIONS: ThemeOption[] = [
   {
-    id: 'navy',
+    id: 'light_white',
+    label: 'Light White',
+    description: 'Crisp white background (#FFFFFF) with clean slate surfaces and high-contrast dark text',
+    previewColors: ['#FFFFFF', '#DC2626'],
+  },
+  {
+    id: 'midnight_navy',
     label: 'Midnight Navy',
-    description: 'Deep navy surface with emergency crimson accents (Default)',
-    previewColors: ['#0A1128', '#DC2626'],
-  },
-  {
-    id: 'midnight',
-    label: 'Pure Midnight',
-    description: 'Deep OLED pitch black background for battery saving and contrast',
-    previewColors: ['#030712', '#EF4444'],
-  },
-  {
-    id: 'high-contrast',
-    label: 'High Contrast',
-    description: 'Elevated borders and vivid high-visibility emergency alert styling',
-    previewColors: ['#0F172A', '#F87171'],
+    description: 'Deep navy background (#070D1F) with rich cards and emergency crimson (#EF4444)',
+    previewColors: ['#070D1F', '#EF4444'],
   },
 ];
 
@@ -65,6 +61,7 @@ export default function SettingsScreen() {
   const {
     profile,
     settings,
+    themeColors,
     contacts,
     history,
     updateProfile,
@@ -165,12 +162,12 @@ export default function SettingsScreen() {
   };
 
   return (
-    <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
-      <StatusBar barStyle="light-content" />
+    <SafeAreaView edges={['top', 'left', 'right']} style={[styles.container, { backgroundColor: themeColors.background }]}>
+      <StatusBar barStyle={themeColors.statusBarStyle} />
 
       <Header
         title="Profile & Settings"
-        subtitle="Local Preferences • UI Demonstration"
+        subtitle="Account Profile • Two Themes • Preferences"
         variant="navy"
       />
 
@@ -179,40 +176,13 @@ export default function SettingsScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* ================================================================== */}
-        {/* Local Demo Disclaimer Banner                                       */}
-        {/* ================================================================== */}
-        <View style={styles.demoNoticeCard}>
-          <View style={styles.demoNoticeTop}>
-            <View style={styles.demoNoticeBadge}>
-              <View style={styles.demoDot} />
-              <Text style={styles.demoBadgeText}>LOCAL DEMONSTRATION MODE</Text>
-            </View>
-          </View>
-          <Text style={styles.demoNoticeTitle}>Offline UI Demonstration</Text>
-          <Text style={styles.demoNoticeText}>
-            This version of EmergencySOS runs entirely on your local device. Triggering the SOS panic button does not contact 911, dispatch emergency services, send SMS, make phone calls, or track location.
-          </Text>
-        </View>
-
-        {/* ================================================================== */}
-        {/* Emergency Plan Section                                             */}
-        {/* ================================================================== */}
-        <EmergencyPlanSection
-          onItemPress={(route) => {
-            if (route === '/(tabs)/settings') {
-              openEditProfileModal();
-            } else {
-              router.push(route as any);
-            }
-          }}
-        />
-
-        {/* ================================================================== */}
-        {/* 1. Local Profile Section                                           */}
+        {/* 1. Own Profile / Account Section (Top of Profile & Settings)       */}
         {/* ================================================================== */}
         <View style={styles.sectionHeader}>
-          <Ionicons name="person-circle-outline" size={18} color={Colors.slate400} />
-          <Text style={styles.sectionHeaderText}>LOCAL PROFILE</Text>
+          <Ionicons name="person-circle-outline" size={18} color={themeColors.textSecondary} />
+          <Text style={[styles.sectionHeaderText, { color: themeColors.textSecondary }]}>
+            OWN PROFILE / ACCOUNT
+          </Text>
         </View>
 
         <Card variant="navy" style={styles.profileCard}>
@@ -231,43 +201,77 @@ export default function SettingsScreen() {
 
             {/* Profile Info */}
             <View style={styles.profileInfoCol}>
-              <Text style={styles.profileName}>{profile.full_name}</Text>
-              <Text style={styles.profileRole}>EmergencySOS User • Local Profile</Text>
+              <Text style={[styles.profileName, { color: themeColors.textPrimary }]}>{profile.full_name}</Text>
+              <Text style={[styles.profileRole, { color: themeColors.textSecondary }]}>
+                EmergencySOS User • Own Account Profile
+              </Text>
             </View>
 
             {/* Edit Button */}
             <TouchableOpacity
               onPress={openEditProfileModal}
-              style={styles.editProfileBtn}
+              style={[
+                styles.editProfileBtn,
+                { backgroundColor: themeColors.cardNavyBackground, borderColor: themeColors.cardBorder, borderWidth: 1 }
+              ]}
               activeOpacity={0.8}
               accessible={true}
               accessibilityRole="button"
-              accessibilityLabel="Edit Local Profile"
+              accessibilityLabel="Edit Profile"
               accessibilityHint="Opens modal to edit full name and medical notes"
             >
-              <Ionicons name="create-outline" size={15} color={Colors.white} />
-              <Text style={styles.editProfileBtnText}>Edit</Text>
+              <Ionicons name="create-outline" size={15} color={themeColors.textPrimary} />
+              <Text style={[styles.editProfileBtnText, { color: themeColors.textPrimary }]}>Edit</Text>
             </TouchableOpacity>
           </View>
 
           {/* Medical Notes Box */}
-          <View style={styles.medicalNotesBox}>
+          <View style={[styles.medicalNotesBox, { backgroundColor: themeColors.cardNavyBackground, borderColor: themeColors.cardBorderSubtle }]}>
             <View style={styles.medicalNotesLabelRow}>
-              <Ionicons name="medical" size={14} color={Colors.emergency.primary} />
+              <Ionicons name="medical" size={14} color={themeColors.emergencyPrimary} />
               <Text style={styles.medicalNotesLabel}>MEDICAL NOTES & ALLERGIES</Text>
             </View>
-            <Text style={styles.medicalNotesText}>
+            <Text style={[styles.medicalNotesText, { color: themeColors.textPrimary }]}>
               {profile.medical_notes || 'No medical notes added. Tap Edit to add allergies or health conditions.'}
             </Text>
           </View>
         </Card>
 
         {/* ================================================================== */}
-        {/* 2. SOS Preferences Section                                         */}
+        {/* 2. Emergency Plan Section                                          */}
+        {/* ================================================================== */}
+        <EmergencyPlanSection
+          onItemPress={(route) => {
+            if (route === '/(tabs)/settings') {
+              openEditProfileModal();
+            } else {
+              router.push(route as any);
+            }
+          }}
+        />
+
+        {/* ================================================================== */}
+        {/* 3. Local Demo Disclaimer Banner                                    */}
+        {/* ================================================================== */}
+        <View style={[styles.demoNoticeCard, { backgroundColor: themeColors.cardNavyBackground, borderColor: 'rgba(245, 158, 11, 0.35)' }]}>
+          <View style={styles.demoNoticeTop}>
+            <View style={styles.demoNoticeBadge}>
+              <View style={styles.demoDot} />
+              <Text style={styles.demoBadgeText}>LOCAL DEMONSTRATION MODE</Text>
+            </View>
+          </View>
+          <Text style={[styles.demoNoticeTitle, { color: themeColors.textPrimary }]}>Offline UI Demonstration</Text>
+          <Text style={[styles.demoNoticeText, { color: themeColors.textSecondary }]}>
+            This version of EmergencySOS runs entirely on your local device. Triggering the SOS panic button does not contact emergency services (112 / Police: 100), dispatch responders, send SMS, make phone calls, or track location.
+          </Text>
+        </View>
+
+        {/* ================================================================== */}
+        {/* 4. SOS Preferences Section                                         */}
         {/* ================================================================== */}
         <View style={styles.sectionHeader}>
-          <Ionicons name="options-outline" size={18} color={Colors.slate400} />
-          <Text style={styles.sectionHeaderText}>SOS PREFERENCES</Text>
+          <Ionicons name="options-outline" size={18} color={themeColors.textSecondary} />
+          <Text style={[styles.sectionHeaderText, { color: themeColors.textSecondary }]}>SOS PREFERENCES</Text>
         </View>
 
         <Card variant="navy" style={styles.preferencesCard}>
@@ -467,12 +471,21 @@ export default function SettingsScreen() {
         <Card variant="navy" style={styles.preferencesCard}>
           <View style={styles.themeOptionsList}>
             {THEME_OPTIONS.map((themeOpt) => {
-              const isSelected = (settings.theme || 'navy') === themeOpt.id;
+              const currentTheme = settings.theme || 'midnight_navy';
+              const isSelected =
+                (themeOpt.id === 'light_white' && currentTheme === 'light_white') ||
+                (themeOpt.id === 'midnight_navy' && currentTheme !== 'light_white');
+
               return (
                 <TouchableOpacity
                   key={themeOpt.id}
                   style={[
                     styles.themeOptionCard,
+                    {
+                      backgroundColor: themeColors.cardNavyBackground,
+                      borderColor: isSelected ? themeColors.emergencyPrimary : themeColors.cardBorder,
+                      borderWidth: isSelected ? 2 : 1,
+                    },
                     isSelected && styles.themeOptionCardSelected,
                   ]}
                   onPress={() => handleSelectTheme(themeOpt.id)}
@@ -499,12 +512,12 @@ export default function SettingsScreen() {
 
                   <View style={styles.themeTextCol}>
                     <View style={styles.themeTitleRow}>
-                      <Text style={styles.themeLabel}>{themeOpt.label}</Text>
+                      <Text style={[styles.themeLabel, { color: themeColors.textPrimary }]}>{themeOpt.label}</Text>
                       {isSelected && (
-                        <Badge label="ACTIVE" variant="success" />
+                        <Badge label="ACTIVE" variant="danger" />
                       )}
                     </View>
-                    <Text style={styles.themeDesc}>{themeOpt.description}</Text>
+                    <Text style={[styles.themeDesc, { color: themeColors.textSecondary }]}>{themeOpt.description}</Text>
                   </View>
                 </TouchableOpacity>
               );

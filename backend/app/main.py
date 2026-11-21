@@ -41,6 +41,16 @@ app.add_middleware(
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
 
+@app.get("/health", tags=["Health"], include_in_schema=False)
+def root_health():
+    return {
+        "status": "online",
+        "app_name": settings.PROJECT_NAME,
+        "version": settings.VERSION,
+        "environment": settings.ENVIRONMENT,
+    }
+
+
 @app.get("/", tags=["Root"])
 def root():
     return {
