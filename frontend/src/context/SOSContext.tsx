@@ -42,7 +42,7 @@ interface SOSContextType {
   shareGoogleMapsLink: () => Promise<void>;
   dispatchSMSFallback: () => Promise<void>;
   refreshLocation: () => Promise<LocationCoordinates>;
-  addContact: (contact: Omit<EmergencyContact, 'id'>) => Promise<void>;
+  addContact: (contact: Omit<EmergencyContact, 'id'> & { id?: number }) => Promise<void>;
   updateContact: (id: number, contact: Partial<EmergencyContact>) => Promise<void>;
   deleteContact: (id: number) => Promise<void>;
   addDemoAlertRecord: (locationInfo?: {
@@ -619,7 +619,6 @@ export const SOSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // 2. Create emergency event via Backend API (POST /api/v1/sos/trigger)
       try {
         alertData = await apiService.triggerSOS({
-          user_id: 1,
           latitude,
           longitude,
           accuracy: loc.accuracy || undefined,
@@ -797,8 +796,8 @@ export const SOSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Contacts CRUD - Device-only local persistence
-  const addContact = async (contactIn: Omit<EmergencyContact, 'id'>) => {
-    const newId = Date.now();
+  const addContact = async (contactIn: (Omit<EmergencyContact, 'id'> & { id?: number })) => {
+    const newId = contactIn.id || Date.now();
     const isPrim = contactIn.priority_level === 'PRIMARY' || contactIn.is_primary;
     const newContact: EmergencyContact = {
       ...contactIn,
@@ -806,6 +805,7 @@ export const SOSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       is_primary: isPrim,
       priority_level: contactIn.priority_level || (isPrim ? 'PRIMARY' : 'STANDARD'),
       avatar_color: ['#034078', '#0D3B66', '#1282A2', '#001F54'][contacts.length % 4],
+      synced: contactIn.synced ?? (newId < 1000000000000),
     };
 
     let updated = [...contacts, newContact];

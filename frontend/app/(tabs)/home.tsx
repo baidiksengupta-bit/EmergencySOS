@@ -26,6 +26,7 @@ import { CountdownModal } from '../../src/components/sos/CountdownModal';
 import { AlertConfirmationModal } from '../../src/components/sos/AlertConfirmationModal';
 import { EmergencyPlanSection } from '../../src/components/plan/EmergencyPlanSection';
 import { useSOS } from '../../src/context/SOSContext';
+import { useAuth } from '../../src/context/AuthContext';
 import { EmergencyHistoryItem } from '../../src/types';
 
 // Bundled Siren Sound Asset (Original high-intensity emergency audio)
@@ -35,6 +36,7 @@ const { width } = Dimensions.get('window');
 
 export default function HomeScreen() {
   const { settings, contacts, history, addDemoAlertRecord, refreshPermissionStatus, themeColors } = useSOS();
+  const { user } = useAuth();
 
   // Preloaded Audio Player using Expo's expo-audio
   const sirenPlayer = useAudioPlayer(sirenSoundAsset);
@@ -330,7 +332,7 @@ export default function HomeScreen() {
     }
 
     const payload = {
-      user_id: 1,
+      ...(user?.id ? { user_id: user.id } : {}),
       latitude: locLat,
       longitude: locLon,
       accuracy: locAccuracy || undefined,

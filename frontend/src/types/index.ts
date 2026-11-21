@@ -39,6 +39,7 @@ export interface EmergencyContact {
   priority_level?: ContactPriority;
   email?: string;
   avatar_color?: string;
+  synced?: boolean;
 }
 
 export interface SOSAlert {

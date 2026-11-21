@@ -53,6 +53,15 @@ export interface ContactUpdatePayload {
   is_primary?: boolean;
 }
 
+/**
+ * Check whether a contact ID is a local unsynced timestamp ID (> 1,000,000,000,000 / ~Date.now()).
+ * Backend SQLite autoincrement IDs are small positive integers (1, 2, 3...).
+ */
+export const isLocalContactId = (id: number | null | undefined): boolean => {
+  if (!id) return true;
+  return Number(id) > 1000000000000;
+};
+
 export interface AuthRegisterPayload {
   full_name: string;
   phone_number: string;
@@ -328,7 +337,7 @@ export const apiService = {
   getHistory: async (params?: HistoryQueryParams): Promise<SOSAlert[]> => {
     const response = await apiClient.get<SOSAlert[]>('/sos/history', {
       params: {
-        user_id: params?.user_id ?? 1,
+        ...(params?.user_id ? { user_id: params.user_id } : {}),
         ...(params?.status_filter ? { status_filter: params.status_filter } : {}),
       },
     });

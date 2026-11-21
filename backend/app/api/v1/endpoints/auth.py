@@ -53,7 +53,14 @@ def register(user_in: UserRegister, db: Session = Depends(get_db)):
     db.refresh(user)
 
     # 5. Generate JWT token
-    access_token = create_access_token(subject=user.id)
+    access_token = create_access_token(
+        subject=user.id,
+        extra_claims={
+            "email": user.email,
+            "phone_number": user.phone_number,
+            "full_name": user.full_name,
+        },
+    )
 
     return Token(
         access_token=access_token,
@@ -92,7 +99,14 @@ def login(login_in: UserLogin, db: Session = Depends(get_db)):
             detail="User account is deactivated.",
         )
 
-    access_token = create_access_token(subject=user.id)
+    access_token = create_access_token(
+        subject=user.id,
+        extra_claims={
+            "email": user.email,
+            "phone_number": user.phone_number,
+            "full_name": user.full_name,
+        },
+    )
 
     return Token(
         access_token=access_token,

@@ -565,3 +565,45 @@ async def test_nearby_services_overpass_timeout_returns_503(client, monkeypatch)
     assert "temporarily unreachable or timed out" in response.json()["detail"]
 
 
+def test_contacts_with_wiped_user_auto_restores(client):
+    """
+    Simulates a SQLite database wipe / server restart where the client still
+    holds a valid JWT for user ID 9999. The backend should auto-ensure the user
+    exists and allow adding contacts without throwing 404.
+    """
+    from app.core.security import create_access_token
+    token = create_access_token(
+        subject=9999,
+        extra_claims={
+            "email": "wiped_user_9999@emergencysos.org",
+            "phone_number": "+15559999999",
+            "full_name": "Restored Session User",
+        },
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Call POST /api/v1/contacts with this token (and no user_id in body)
+    res = client.post(
+        "/api/v1/contacts/",
+        json={"name": "Jane Doe", "phone_number": "+15550001111", "relationship_label": "Sister"},
+        headers=headers,
+    )
+    assert res.status_code == 201
+    contact = res.json()
+    assert contact["user_id"] == 9999
+    assert contact["name"] == "Jane Doe"
+
+    # Verify user profile endpoint works for restored user
+    me_res = client.get("/api/v1/auth/me", headers=headers)
+    assert me_res.status_code == 200
+    assert me_res.json()["id"] == 9999
+    assert me_res.json()["email"] == "wiped_user_9999@emergencysos.org"
+
+
+def test_contacts_with_invalid_jwt_returns_401(client):
+    """GET /api/v1/contacts/ with an invalid Bearer token returns 401 Unauthorized."""
+    res = client.get("/api/v1/contacts/", headers={"Authorization": "Bearer invalid.fake.token"})
+    assert res.status_code == 401
+
+
+

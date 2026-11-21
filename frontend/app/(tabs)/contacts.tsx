@@ -22,7 +22,7 @@ import { Button } from '../../src/components/common/Button';
 import { useSOS } from '../../src/context/SOSContext';
 import { useAuth } from '../../src/context/AuthContext';
 import { EmergencyContact, ContactPriority } from '../../src/types';
-import { apiService } from '../../src/services/api';
+import { apiService, isLocalContactId } from '../../src/services/api';
 import { Ionicons } from '@expo/vector-icons';
 
 const RELATIONSHIP_OPTIONS = [
@@ -98,7 +98,14 @@ export default function ContactsScreen() {
   const syncLocalContactsToBackend = async (showLoading = false) => {
     if (showLoading) setIsLoading(true);
     try {
-      const targetUserId = user?.id || 1;
+      const targetUserId = user?.id;
+      // If user is neither authenticated nor has a valid user ID, stay in safe local/offline mode
+      if (!isAuthenticated && !targetUserId) {
+        setBackendStatus('offline');
+        setBackendContacts(null);
+        return;
+      }
+
       const data = await apiService.getContacts(targetUserId);
 
       if (Array.isArray(data)) {
@@ -128,7 +135,7 @@ export default function ContactsScreen() {
                 phone_number: localContact.phone_number,
                 relationship_label: localContact.relationship_label,
                 is_primary: localContact.is_primary,
-                user_id: targetUserId,
+                ...(targetUserId ? { user_id: targetUserId } : {}),
               });
             } catch (postErr) {
               const errStr = formatHttpError(postErr);
@@ -237,27 +244,31 @@ export default function ContactsScreen() {
 
     const isPrimary = priority === 'PRIMARY';
     const contactName = name.trim();
-    const targetUserId = user?.id || 1;
+    const targetUserId = user?.id;
     setIsSubmitting(true);
     setFormError(null);
 
     try {
       if (editingContact) {
-        // Attempt backend update
+        const isLocalOnly = isLocalContactId(editingContact.id) || editingContact.synced === false;
         let updatedOnBackend = false;
-        try {
-          await apiService.updateContact(editingContact.id, {
-            name: contactName,
-            phone_number: phone.trim(),
-            relationship_label: relationship,
-            is_primary: isPrimary,
-          });
-          updatedOnBackend = true;
-          setLastHttpError(null);
-        } catch (apiErr: any) {
-          const errStr = formatHttpError(apiErr);
-          console.warn('Backend updateContact error:', errStr);
-          setLastHttpError(errStr);
+
+        // Only call backend API if contact exists on backend (not a local timestamp)
+        if (!isLocalOnly && isBackendConnected) {
+          try {
+            await apiService.updateContact(editingContact.id, {
+              name: contactName,
+              phone_number: phone.trim(),
+              relationship_label: relationship,
+              is_primary: isPrimary,
+            });
+            updatedOnBackend = true;
+            setLastHttpError(null);
+          } catch (apiErr: any) {
+            const errStr = formatHttpError(apiErr);
+            console.warn('Backend updateContact error:', errStr);
+            setLastHttpError(errStr);
+          }
         }
 
         // Always update local persistent storage
@@ -276,30 +287,34 @@ export default function ContactsScreen() {
             : `${contactName} has been updated on this device.`
         );
       } else {
-        // Create new contact via POST /api/v1/contacts/
+        // Create new contact via POST /api/v1/contacts/ if authenticated/connected
         let createdBackendContact: EmergencyContact | null = null;
-        try {
-          createdBackendContact = await apiService.createContact({
-            user_id: targetUserId,
-            name: contactName,
-            phone_number: phone.trim(),
-            relationship_label: relationship,
-            is_primary: isPrimary,
-          });
-          setLastHttpError(null);
-        } catch (apiErr: any) {
-          const errStr = formatHttpError(apiErr);
-          console.warn('Backend createContact failed, saving locally:', errStr);
-          setLastHttpError(errStr);
+        if (isAuthenticated || targetUserId) {
+          try {
+            createdBackendContact = await apiService.createContact({
+              ...(targetUserId ? { user_id: targetUserId } : {}),
+              name: contactName,
+              phone_number: phone.trim(),
+              relationship_label: relationship,
+              is_primary: isPrimary,
+            });
+            setLastHttpError(null);
+          } catch (apiErr: any) {
+            const errStr = formatHttpError(apiErr);
+            console.warn('Backend createContact failed, saving locally:', errStr);
+            setLastHttpError(errStr);
+          }
         }
 
         // Always persist locally in device storage via SOSContext
         await addContact({
+          ...(createdBackendContact?.id ? { id: createdBackendContact.id } : {}),
           name: contactName,
           phone_number: phone.trim(),
           relationship_label: relationship,
           priority_level: priority,
           is_primary: isPrimary,
+          synced: !!createdBackendContact,
         });
 
         Alert.alert(
@@ -311,7 +326,9 @@ export default function ContactsScreen() {
       }
 
       setModalVisible(false);
-      syncLocalContactsToBackend(false);
+      if (isAuthenticated || targetUserId) {
+        syncLocalContactsToBackend(false);
+      }
     } catch (e: any) {
       const errStr = formatHttpError(e);
       setFormError(errStr);
@@ -330,19 +347,27 @@ export default function ContactsScreen() {
           text: 'Remove',
           style: 'destructive',
           onPress: async () => {
+            const isLocalOnly = isLocalContactId(contact.id) || contact.synced === false;
             let deletedOnBackend = false;
-            try {
-              await apiService.deleteContact(contact.id);
-              deletedOnBackend = true;
-              setLastHttpError(null);
-            } catch (err: any) {
-              const errStr = formatHttpError(err);
-              console.warn('Backend delete offline or error:', errStr);
-              setLastHttpError(errStr);
+
+            // Only attempt backend deletion if this is a real backend ID, NOT a local timestamp
+            if (!isLocalOnly && isBackendConnected) {
+              try {
+                await apiService.deleteContact(contact.id);
+                deletedOnBackend = true;
+                setLastHttpError(null);
+              } catch (err: any) {
+                const errStr = formatHttpError(err);
+                console.warn('Backend delete offline or error:', errStr);
+                setLastHttpError(errStr);
+              }
             }
 
-            // Always remove from local device storage
+            // Always remove from local device storage (AsyncStorage)
             await deleteContact(contact.id);
+
+            // Also remove from local backendContacts state cache if present
+            setBackendContacts((prev) => (prev ? prev.filter((c) => c.id !== contact.id) : null));
 
             Alert.alert(
               'Contact Removed',
@@ -351,7 +376,9 @@ export default function ContactsScreen() {
                 : `${contact.name} was removed from this device.`
             );
 
-            syncLocalContactsToBackend(false);
+            if (isBackendConnected && !isLocalOnly) {
+              syncLocalContactsToBackend(false);
+            }
           },
         },
       ]
@@ -359,16 +386,21 @@ export default function ContactsScreen() {
   };
 
   const handleSetPrimary = async (item: EmergencyContact) => {
-    try {
-      await apiService.updateContact(item.id, { is_primary: true });
-      setLastHttpError(null);
-    } catch (err: any) {
-      const errStr = formatHttpError(err);
-      console.warn('Backend update primary error:', errStr);
-      setLastHttpError(errStr);
+    const isLocalOnly = isLocalContactId(item.id) || item.synced === false;
+    if (!isLocalOnly && isBackendConnected) {
+      try {
+        await apiService.updateContact(item.id, { is_primary: true });
+        setLastHttpError(null);
+      } catch (err: any) {
+        const errStr = formatHttpError(err);
+        console.warn('Backend update primary error:', errStr);
+        setLastHttpError(errStr);
+      }
     }
     await updateContact(item.id, { priority_level: 'PRIMARY', is_primary: true });
-    syncLocalContactsToBackend(false);
+    if (isBackendConnected && !isLocalOnly) {
+      syncLocalContactsToBackend(false);
+    }
   };
 
   const getPriorityBadgeVariant = (level?: ContactPriority, isPrimary?: boolean) => {
