@@ -243,3 +243,5 @@ All endpoints are prefixed with `/api/v1` and interactive documentation is avail
 2. **Google Maps Visualisation:** Provide live polyline tracking of breadcrumbs on the map screen.
 3. **Firebase Cloud Messaging:** Plug in active FCM credentials in `backend/.env` for real-time mobile push notifications.
 4. **SMS / Twilio Fallback:** Add automated SMS dispatch if data connection is degraded during an SOS event.
+#   E m e r g e n c y S O S  
+ 
