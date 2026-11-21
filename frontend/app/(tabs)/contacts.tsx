@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,9 +9,10 @@ import {
   Modal,
   Alert,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Colors } from '../../src/constants/Colors';
 import { Header } from '../../src/components/common/Header';
 import { Card } from '../../src/components/common/Card';
@@ -20,6 +21,7 @@ import { Input } from '../../src/components/common/Input';
 import { Button } from '../../src/components/common/Button';
 import { useSOS } from '../../src/context/SOSContext';
 import { EmergencyContact, ContactPriority } from '../../src/types';
+import { apiService } from '../../src/services/api';
 import { Ionicons } from '@expo/vector-icons';
 
 const RELATIONSHIP_OPTIONS = [
@@ -46,6 +48,12 @@ export default function ContactsScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [editingContact, setEditingContact] = useState<EmergencyContact | null>(null);
 
+  // Backend Sync State
+  const [backendContacts, setBackendContacts] = useState<EmergencyContact[] | null>(null);
+  const [backendStatus, setBackendStatus] = useState<'connected' | 'offline' | 'checking'>('checking');
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   // Form State
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -53,13 +61,46 @@ export default function ContactsScreen() {
   const [priority, setPriority] = useState<ContactPriority>('STANDARD');
   const [formError, setFormError] = useState<string | null>(null);
 
+  // Load contacts from GET /api/v1/contacts/ on mount and focus
+  const fetchBackendContacts = async (showLoading = false) => {
+    if (showLoading) setIsLoading(true);
+    try {
+      const data = await apiService.getContacts(1);
+      if (Array.isArray(data)) {
+        setBackendContacts(data);
+        setBackendStatus('connected');
+      }
+    } catch (err) {
+      console.warn('Backend contacts endpoint unreachable, operating in safe offline mode:', err);
+      setBackendStatus('offline');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchBackendContacts(false);
+    }, [])
+  );
+
+  useEffect(() => {
+    fetchBackendContacts(true);
+  }, []);
+
+  // Display priority: backend contacts if loaded and non-empty, otherwise local contacts
+  const displayContacts =
+    backendStatus === 'connected' && backendContacts !== null && backendContacts.length > 0
+      ? backendContacts
+      : contacts;
+
   const openAddModal = () => {
     setEditingContact(null);
     setName('');
     setPhone('');
     setRelationship('Family');
     // Default to PRIMARY if first contact, else STANDARD
-    setPriority(contacts.length === 0 ? 'PRIMARY' : 'STANDARD');
+    setPriority(displayContacts.length === 0 ? 'PRIMARY' : 'STANDARD');
     setFormError(null);
     setModalVisible(true);
   };
@@ -120,9 +161,26 @@ export default function ContactsScreen() {
 
     const isPrimary = priority === 'PRIMARY';
     const contactName = name.trim();
+    setIsSubmitting(true);
+    setFormError(null);
 
     try {
       if (editingContact) {
+        // Attempt backend update if supported
+        let updatedOnBackend = false;
+        try {
+          await apiService.updateContact(editingContact.id, {
+            name: contactName,
+            phone_number: phone.trim(),
+            relationship_label: relationship,
+            is_primary: isPrimary,
+          });
+          updatedOnBackend = true;
+        } catch (apiErr) {
+          console.warn('Backend updateContact not supported or unreachable:', apiErr);
+        }
+
+        // Always update local persistent storage
         await updateContact(editingContact.id, {
           name: contactName,
           phone_number: phone.trim(),
@@ -130,8 +188,29 @@ export default function ContactsScreen() {
           priority_level: priority,
           is_primary: isPrimary,
         });
-        Alert.alert('Contact Updated', `${contactName} has been updated on your device.`);
+
+        Alert.alert(
+          'Contact Updated',
+          updatedOnBackend
+            ? `${contactName} has been updated on the backend server.`
+            : `${contactName} has been updated on this device.`
+        );
       } else {
+        // Create new contact via POST /api/v1/contacts/
+        let createdBackendContact: EmergencyContact | null = null;
+        try {
+          createdBackendContact = await apiService.createContact({
+            user_id: 1,
+            name: contactName,
+            phone_number: phone.trim(),
+            relationship_label: relationship,
+            is_primary: isPrimary,
+          });
+        } catch (apiErr) {
+          console.warn('Backend createContact failed, saving locally:', apiErr);
+        }
+
+        // Always persist locally in device storage via SOSContext
         await addContact({
           name: contactName,
           phone_number: phone.trim(),
@@ -139,30 +218,67 @@ export default function ContactsScreen() {
           priority_level: priority,
           is_primary: isPrimary,
         });
-        Alert.alert('Contact Added', `${contactName} has been added to your emergency contacts.`);
+
+        Alert.alert(
+          'Contact Added',
+          createdBackendContact
+            ? `${contactName} has been saved to the backend database.`
+            : `${contactName} has been saved locally on this device (offline mode).`
+        );
       }
+
       setModalVisible(false);
+      fetchBackendContacts(false);
     } catch (e: any) {
       setFormError(e?.message || 'Failed to save contact. Please try again.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const confirmRemoveContact = (contact: EmergencyContact) => {
     Alert.alert(
       'Remove Emergency Contact?',
-      `Are you sure you want to remove ${contact.name} (${contact.relationship_label}) from your emergency contacts list? This contact will be deleted from this device.`,
+      `Are you sure you want to remove ${contact.name} (${contact.relationship_label}) from your emergency contacts list?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Remove',
           style: 'destructive',
           onPress: async () => {
+            let deletedOnBackend = false;
+            try {
+              await apiService.deleteContact(contact.id);
+              deletedOnBackend = true;
+            } catch (err) {
+              console.warn('Backend delete offline or contact only exists locally:', err);
+            }
+
+            // Always remove from local device storage
             await deleteContact(contact.id);
-            Alert.alert('Contact Removed', `${contact.name} was removed from your device.`);
+
+            Alert.alert(
+              'Contact Removed',
+              deletedOnBackend
+                ? `${contact.name} was removed from the backend database.`
+                : `${contact.name} was removed from this device.`
+            );
+
+            fetchBackendContacts(false);
           },
         },
       ]
     );
+  };
+
+  const handleSetPrimary = async (item: EmergencyContact) => {
+    try {
+      await apiService.updateContact(item.id, { is_primary: true });
+    } catch (err) {
+      console.warn('Backend update primary not supported or offline:', err);
+    }
+    await updateContact(item.id, { priority_level: 'PRIMARY', is_primary: true });
+    fetchBackendContacts(false);
   };
 
   const getPriorityBadgeVariant = (level?: ContactPriority, isPrimary?: boolean) => {
@@ -178,15 +294,17 @@ export default function ContactsScreen() {
       <Header
         title="Emergency Contacts"
         subtitle={
-          contacts.length === 0
+          displayContacts.length === 0
             ? 'No Contacts Stored'
-            : `${contacts.length} Contact${contacts.length === 1 ? '' : 's'} Stored Locally`
+            : `${displayContacts.length} Contact${displayContacts.length === 1 ? '' : 's'} ${
+                backendStatus === 'connected' ? 'Synced with Backend' : 'Saved on Device'
+              }`
         }
         variant="navy"
         showBack={true}
         onBack={() => router.push('/(tabs)/home')}
         rightAction={
-          contacts.length > 0
+          displayContacts.length > 0
             ? {
                 icon: 'person-add',
                 onPress: openAddModal,
@@ -196,23 +314,74 @@ export default function ContactsScreen() {
       />
 
       <View style={styles.content}>
+        {/* Backend Synchronization & Offline Status Bar */}
+        <View style={styles.syncStatusBar}>
+          <View style={styles.syncStatusLeft}>
+            <View
+              style={[
+                styles.syncStatusDot,
+                backendStatus === 'connected'
+                  ? styles.syncDotConnected
+                  : backendStatus === 'checking'
+                  ? styles.syncDotChecking
+                  : styles.syncDotOffline,
+              ]}
+            />
+            <Text style={styles.syncStatusText} numberOfLines={1}>
+              {backendStatus === 'connected'
+                ? 'FastAPI Backend Synced'
+                : backendStatus === 'checking'
+                ? 'Connecting to Backend...'
+                : 'Offline Mode • Device Storage Active'}
+            </Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => fetchBackendContacts(true)}
+            style={styles.syncRefreshBtn}
+            disabled={isLoading}
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Refresh contacts from backend"
+          >
+            {isLoading ? (
+              <ActivityIndicator size="small" color={Colors.white} />
+            ) : (
+              <View style={styles.syncRefreshRow}>
+                <Ionicons
+                  name={backendStatus === 'connected' ? 'refresh-outline' : 'cloud-offline-outline'}
+                  size={14}
+                  color={backendStatus === 'connected' ? Colors.emergency.light : Colors.warning}
+                />
+                <Text
+                  style={[
+                    styles.syncRefreshText,
+                    backendStatus === 'offline' && { color: Colors.warning },
+                  ]}
+                >
+                  {backendStatus === 'connected' ? 'Refresh' : 'Retry'}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </View>
+
         {/* Device-Only Privacy Notice */}
         <View style={styles.privacyBanner}>
           <Ionicons name="shield-checkmark" size={18} color={Colors.success} />
           <View style={styles.privacyTextCol}>
-            <Text style={styles.privacyBannerTitle}>100% DEVICE-ONLY STORAGE</Text>
+            <Text style={styles.privacyBannerTitle}>PRIVACY-FIRST EMERGENCY CONTACTS</Text>
             <Text style={styles.privacyBannerSub}>
-              Contacts are saved locally on this device. No contact book access, no external uploads, and no calls or texts are made.
+              Contacts are saved locally and synchronized with your personal EmergencySOS backend when connected. No address book scraping and no live emergency calls/SMS are dispatched.
             </Text>
           </View>
         </View>
 
         <FlatList
-          data={contacts}
+          data={displayContacts}
           keyExtractor={(item) => item.id.toString()}
           contentContainerStyle={[
             styles.listContent,
-            contacts.length === 0 && styles.listContentEmpty,
+            displayContacts.length === 0 && styles.listContentEmpty,
           ]}
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => (
@@ -273,7 +442,7 @@ export default function ContactsScreen() {
               <View style={styles.cardFooter}>
                 {!(item.priority_level === 'PRIMARY' || item.is_primary) && (
                   <TouchableOpacity
-                    onPress={() => updateContact(item.id, { priority_level: 'PRIMARY', is_primary: true })}
+                    onPress={() => handleSetPrimary(item)}
                     style={styles.setPrimaryBtn}
                     accessible={true}
                     accessibilityRole="button"
@@ -314,7 +483,7 @@ export default function ContactsScreen() {
               </View>
               <Text style={styles.emptyTitle}>No Emergency Contacts Added</Text>
               <Text style={styles.emptySubtitle}>
-                Add trusted family members, physicians, or friends manually to your emergency list. Your contacts are saved privately on this device.
+                Add trusted family members, physicians, or friends manually to your emergency list. Your contacts are saved privately on this device and synced when connected.
               </Text>
               <Button
                 title="Add Emergency Contact"
@@ -339,7 +508,7 @@ export default function ContactsScreen() {
         />
 
         {/* Floating Add Contact Button when contacts exist */}
-        {contacts.length > 0 && (
+        {displayContacts.length > 0 && (
           <Button
             title="+ Add Emergency Contact"
             variant="danger"
@@ -477,7 +646,7 @@ export default function ContactsScreen() {
                 <View style={styles.modalPrivacyNote}>
                   <Ionicons name="lock-closed" size={14} color={Colors.navy[500]} />
                   <Text style={styles.modalPrivacyText}>
-                    Stored exclusively on your device storage. No contact book access or remote uploads.
+                    Saved locally and synced to your EmergencySOS backend. No external calls or SMS are made.
                   </Text>
                 </View>
 
@@ -487,12 +656,25 @@ export default function ContactsScreen() {
                     title="Cancel"
                     variant="outline"
                     onPress={() => setModalVisible(false)}
+                    disabled={isSubmitting}
                     style={{ flex: 1, marginRight: 8 }}
                   />
                   <Button
-                    title={editingContact ? 'Save Changes' : 'Add Contact'}
+                    title={
+                      isSubmitting
+                        ? 'Saving...'
+                        : editingContact
+                        ? 'Save Changes'
+                        : 'Add Contact'
+                    }
                     variant="danger"
                     onPress={handleSaveContact}
+                    disabled={isSubmitting}
+                    icon={
+                      isSubmitting ? (
+                        <ActivityIndicator size="small" color={Colors.white} />
+                      ) : undefined
+                    }
                     style={{ flex: 1, marginLeft: 8 }}
                   />
                 </View>
@@ -865,6 +1047,63 @@ const styles = StyleSheet.create({
     marginLeft: 6,
     flex: 1,
     lineHeight: 15,
+  },
+
+  // Backend Synchronization Status Bar
+  syncStatusBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: Colors.navy[800],
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.navy[700],
+    marginBottom: 10,
+  },
+  syncStatusLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 8,
+  },
+  syncStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  syncDotConnected: {
+    backgroundColor: Colors.success,
+  },
+  syncDotChecking: {
+    backgroundColor: Colors.info,
+  },
+  syncDotOffline: {
+    backgroundColor: Colors.warning,
+  },
+  syncStatusText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.white,
+    flex: 1,
+  },
+  syncRefreshBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    backgroundColor: Colors.navy[700],
+  },
+  syncRefreshRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  syncRefreshText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: Colors.emergency.light,
   },
 
   modalActions: {

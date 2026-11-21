@@ -21,51 +21,79 @@ import { Ionicons } from '@expo/vector-icons';
 const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 
 export default function RegisterScreen() {
-  const { register, isLoading } = useAuth();
+  const { register, continueInDemoMode, isLoading, authError, clearAuthError } = useAuth();
 
   const [fullName, setFullName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [bloodGroup, setBloodGroup] = useState('O+');
   const [allergies, setAllergies] = useState('');
   const [medicalNotes, setMedicalNotes] = useState('');
   const [pin, setPin] = useState('1234');
-  const [error, setError] = useState<string | null>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  const activeError = localError || authError;
 
   const handleRegister = async () => {
     if (!fullName.trim()) {
-      setError('Please provide your full legal name.');
+      setLocalError('Please provide your full legal name.');
       return;
     }
     if (!phoneNumber.trim() || phoneNumber.length < 7) {
-      setError('Please provide a valid emergency telephone number.');
+      setLocalError('Please provide a valid emergency telephone number.');
       return;
     }
     if (!email.trim() || !email.includes('@')) {
-      setError('Please provide a valid contact email address.');
+      setLocalError('Please provide a valid contact email address.');
+      return;
+    }
+    if (!password.trim() || password.length < 6) {
+      setLocalError('Please provide an account password with at least 6 characters.');
       return;
     }
 
-    setError(null);
-    const success = await register({
+    setLocalError(null);
+    clearAuthError();
+
+    const result = await register({
       full_name: fullName.trim(),
       phone_number: phoneNumber.trim(),
       email: email.trim(),
+      password: password,
       blood_group: bloodGroup,
       allergies: allergies.trim() || 'None reported',
       medical_notes: medicalNotes.trim() || 'No special conditions',
       emergency_pin: pin,
     });
 
-    if (success) {
+    if (result.success) {
       Alert.alert(
         'Profile Created Successfully',
-        'Your Emergency SOS profile is now active and ready to broadcast in critical moments.',
+        'Your Emergency SOS profile is now registered with the backend and ready to broadcast in critical moments.',
         [{ text: 'Proceed to Dashboard', onPress: () => router.replace('/(tabs)') }]
       );
     } else {
-      Alert.alert('Registration Error', 'Unable to create account. Please try again.');
+      Alert.alert(
+        'Registration Failed',
+        result.error || 'Unable to create account. Please check your information or continue in Demo Mode.',
+        [
+          { text: 'Review Form', style: 'cancel' },
+          {
+            text: 'Continue in Demo Mode',
+            onPress: async () => {
+              await continueInDemoMode();
+              router.replace('/(tabs)');
+            },
+          },
+        ]
+      );
     }
+  };
+
+  const handleContinueDemo = async () => {
+    await continueInDemoMode();
+    router.replace('/(tabs)');
   };
 
   return (
@@ -103,10 +131,10 @@ export default function RegisterScreen() {
 
           {/* Form Card */}
           <View style={styles.formCard}>
-            {error && (
+            {activeError && (
               <View style={styles.errorAlert}>
                 <Ionicons name="alert-circle" size={18} color={Colors.emergency.primary} />
-                <Text style={styles.errorAlertText}>{error}</Text>
+                <Text style={styles.errorAlertText}>{activeError}</Text>
               </View>
             )}
 
@@ -118,7 +146,8 @@ export default function RegisterScreen() {
               value={fullName}
               onChangeText={(val) => {
                 setFullName(val);
-                if (error) setError(null);
+                if (localError) setLocalError(null);
+                if (authError) clearAuthError();
               }}
             />
 
@@ -130,7 +159,8 @@ export default function RegisterScreen() {
               value={phoneNumber}
               onChangeText={(val) => {
                 setPhoneNumber(val);
-                if (error) setError(null);
+                if (localError) setLocalError(null);
+                if (authError) clearAuthError();
               }}
             />
 
@@ -143,7 +173,21 @@ export default function RegisterScreen() {
               value={email}
               onChangeText={(val) => {
                 setEmail(val);
-                if (error) setError(null);
+                if (localError) setLocalError(null);
+                if (authError) clearAuthError();
+              }}
+            />
+
+            <Input
+              label="Account Password (Min 6 Characters)"
+              placeholder="Create secure password"
+              icon="lock-closed-outline"
+              isPassword
+              value={password}
+              onChangeText={(val) => {
+                setPassword(val);
+                if (localError) setLocalError(null);
+                if (authError) clearAuthError();
               }}
             />
 
@@ -211,6 +255,20 @@ export default function RegisterScreen() {
               onPress={handleRegister}
               icon={<Ionicons name="shield-checkmark-outline" size={20} color={Colors.white} />}
               style={styles.submitBtn}
+            />
+
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>OR</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            <Button
+              title="Continue in Demo Mode (Offline)"
+              variant="navy"
+              size="md"
+              onPress={handleContinueDemo}
+              icon={<Ionicons name="flash-outline" size={18} color={Colors.white} />}
             />
           </View>
 
@@ -348,6 +406,22 @@ const styles = StyleSheet.create({
   submitBtn: {
     marginTop: 10,
     width: '100%',
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 18,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: Colors.slate200,
+  },
+  dividerText: {
+    marginHorizontal: 12,
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.slate400,
   },
   footerRow: {
     flexDirection: 'row',

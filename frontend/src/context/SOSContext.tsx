@@ -12,6 +12,7 @@ import {
   LocalAppSettings,
   CountdownDuration,
   EmergencyPlanStatus,
+  AlertStatus,
 } from '../types';
 import { apiService } from '../services/api';
 import { locationService } from '../services/location';
@@ -51,6 +52,7 @@ interface SOSContextType {
     google_maps_url?: string;
   }) => Promise<EmergencyHistoryItem>;
   clearHistory: () => Promise<void>;
+  refreshHistory: (statusFilter?: AlertStatus) => Promise<EmergencyHistoryItem[]>;
   updateProfile: (profile: Partial<LocalUserProfile>) => Promise<void>;
   updateSettings: (settings: Partial<LocalAppSettings>) => Promise<void>;
   resetDemoData: () => Promise<void>;
@@ -427,8 +429,34 @@ export const SOSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     try {
       // 1. Capture current GPS location & handle denials / unavailability
-      const loc = await refreshLocation();
-      const mapsUrl = locationService.getGoogleMapsUrl(loc.latitude, loc.longitude);
+      let loc: LocationCoordinates;
+      try {
+        loc = await refreshLocation();
+      } catch (locErr) {
+        console.warn('Location capture failed, using safe fallback coordinates:', locErr);
+        loc = {
+          latitude: 37.78825,
+          longitude: -122.4324,
+          accuracy: 10,
+          address: 'San Francisco, CA (Default Demo Fix)',
+          status: 'UNAVAILABLE',
+          timestamp: Date.now(),
+        };
+        setCurrentLocation(loc);
+      }
+
+      // Safe fallback coordinates if invalid or unavailable
+      const latitude =
+        typeof loc?.latitude === 'number' && !isNaN(loc.latitude)
+          ? loc.latitude
+          : 37.78825;
+      const longitude =
+        typeof loc?.longitude === 'number' && !isNaN(loc.longitude)
+          ? loc.longitude
+          : -122.4324;
+      const mapsUrl = locationService.getGoogleMapsUrl(latitude, longitude);
+      const locStatus: LocationStatus =
+        loc.status === 'ACCURATE' ? 'ACCURATE' : 'DEGRADED';
 
       if (loc.status === 'LOCATION_DENIED') {
         Alert.alert(
@@ -438,42 +466,45 @@ export const SOSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } else if (loc.status === 'UNAVAILABLE') {
         Alert.alert(
           '⚠️ GPS Hardware Unavailable',
-          'Device location services appear to be disabled. Emergency broadcast will proceed with last known telemetry.'
+          'Device location services appear to be disabled. Emergency broadcast will proceed with fallback telemetry.'
         );
       }
 
       let alertData: SOSAlert;
 
-      // 2. Create emergency event via Backend API
+      // 2. Create emergency event via Backend API (POST /api/v1/sos/trigger)
       try {
         alertData = await apiService.triggerSOS({
           user_id: 1,
-          latitude: loc.latitude,
-          longitude: loc.longitude,
+          latitude,
+          longitude,
           accuracy: loc.accuracy || undefined,
-          address: loc.address,
-          message: 'EMERGENCY: User activated SOS panic button!',
-          location_status: loc.status || 'ACCURATE',
+          address: loc.address || 'Real-time GPS Fix',
+          message:
+            settings?.custom_emergency_message ||
+            'EMERGENCY: User activated SOS panic button!',
+          location_status: locStatus,
           google_maps_url: mapsUrl,
         });
 
-        // Check provider delivery confirmation:
-        // Rule: Never show successful delivery unless provider confirms
         if (alertData.delivery_report?.delivery_status !== 'ACCEPTED') {
-          console.warn('Notification provider did not confirm delivery:', alertData.delivery_report);
+          console.warn('Notification provider status:', alertData.delivery_report);
         }
       } catch (networkErr: any) {
-        // 3. Handle Internet Failure: Store event locally & offer cellular SMS fallback
-        console.warn('Internet failure during SOS trigger, creating local offline alert:', networkErr);
+        // 3. Graceful failure / timeout handling: keep local emergency simulation active
+        console.warn(
+          'Backend SOS trigger failed or timed out, preserving local simulation:',
+          networkErr
+        );
 
         const localId = Math.floor(1000 + Math.random() * 9000);
         const offlineReport: NotificationDeliveryReport = {
-          provider: 'cellular_sms_fallback',
+          provider: 'offline_local_simulation',
           delivery_status: 'OFFLINE',
           confirmed_count: 0,
           failed_count: contacts.length,
           recipient_count: contacts.length,
-          details: 'Internet offline. Immediate cellular SMS dispatch recommended.',
+          details: 'Backend unreachable. Preserving local emergency simulation.',
           google_maps_url: mapsUrl,
         };
 
@@ -481,13 +512,15 @@ export const SOSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           id: localId,
           user_id: 1,
           status: 'TRIGGERED',
-          latitude: loc.latitude,
-          longitude: loc.longitude,
+          latitude,
+          longitude,
           accuracy: loc.accuracy || 10,
-          address: loc.address || 'GPS Coordinates',
-          location_status: loc.status || 'DEGRADED',
+          address: loc.address || 'San Francisco, CA (Default Demo Fix)',
+          location_status: locStatus,
           google_maps_url: mapsUrl,
-          message: 'EMERGENCY: SOS panic button triggered (Offline Mode)',
+          message:
+            settings?.custom_emergency_message ||
+            'EMERGENCY: SOS panic button triggered (Offline Simulation Mode)',
           notification_status: 'OFFLINE',
           contacts_alerted_count: 0,
           delivery_report: offlineReport,
@@ -495,50 +528,38 @@ export const SOSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           elapsed_seconds: 0,
           triggered_at: new Date().toISOString(),
         };
-
-        // Prompt user for immediate cellular SMS fallback
-        const primaryContact = contacts.find((c) => c.is_primary) || contacts[0];
-        if (primaryContact) {
-          Alert.alert(
-            '📡 Internet Offline: Send Emergency SMS?',
-            `Cannot connect to backend server. Would you like to dispatch an immediate emergency SMS with your Google Maps link to ${primaryContact.name}?`,
-            [
-              { text: 'Later', style: 'cancel' },
-              {
-                text: 'Send SMS Now',
-                style: 'destructive',
-                onPress: () => dispatchSMSFallback(),
-              },
-            ]
-          );
-        }
       }
 
       alertData.google_maps_url = mapsUrl;
-      alertData.breadcrumbs_count = 1;
+      alertData.breadcrumbs_count = alertData.breadcrumbs_count || 1;
       alertData.elapsed_seconds = 0;
 
+      // Store returned backend alert ID in active emergency state
       setActiveAlert(alertData);
       await AsyncStorage.setItem(STORAGE_ACTIVE_ALERT, JSON.stringify(alertData));
 
       // 5. Start periodic location telemetry updates
       startPeriodicTelemetry(alertData.id);
 
-      // Add to history log
+      // Add to history log so demo mode never crashes
       const newHistoryItem: EmergencyHistoryItem = {
         id: `HIST-${alertData.id}`,
         alert_id: alertData.id,
         timestamp: alertData.triggered_at,
-        status: 'TRIGGERED',
+        status: alertData.status || 'TRIGGERED',
         location_address: alertData.address || 'Real-time GPS Fix',
         latitude: alertData.latitude,
         longitude: alertData.longitude,
+        accuracy: alertData.accuracy,
         google_maps_url: mapsUrl,
         contacts_notified_count: alertData.delivery_report?.confirmed_count || 0,
-        notes: `Emergency SOS initiated. Provider status: ${alertData.notification_status}`,
+        notes:
+          alertData.notification_status === 'OFFLINE'
+            ? 'Emergency SOS active (Local Simulation - Backend Offline).'
+            : `Emergency SOS initiated. Alert #${alertData.id}`,
       };
 
-      const updatedHistory = [newHistoryItem, ...history];
+      const updatedHistory = [newHistoryItem, ...history.filter((h) => h.id !== newHistoryItem.id)];
       setHistory(updatedHistory);
       await AsyncStorage.setItem(STORAGE_HISTORY, JSON.stringify(updatedHistory));
     } finally {
@@ -597,9 +618,9 @@ export const SOSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       stopPeriodicTelemetry();
 
       try {
-        await apiService.resolveSOS(activeAlert.id, 'CANCELLED');
+        await apiService.cancelSOS(activeAlert.id, { reason, pin });
       } catch (err) {
-        console.warn('Backend resolve offline, updating local status:', err);
+        console.warn('Backend cancel offline, updating local status:', err);
       }
 
       // Update history record
@@ -718,6 +739,89 @@ export const SOSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return newRecord;
   };
 
+  const mapAlertToHistoryItem = (alert: SOSAlert): EmergencyHistoryItem => {
+    let durationMinutes: number | undefined;
+    if (alert.triggered_at && alert.resolved_at) {
+      const start = new Date(alert.triggered_at).getTime();
+      const end = new Date(alert.resolved_at).getTime();
+      if (!isNaN(start) && !isNaN(end) && end >= start) {
+        durationMinutes = Math.max(1, Math.round((end - start) / 60000));
+      }
+    }
+
+    let locAddress = alert.address;
+    if (!locAddress && alert.latitude != null && alert.longitude != null) {
+      const latDir = alert.latitude >= 0 ? 'N' : 'S';
+      const lonDir = alert.longitude >= 0 ? 'E' : 'W';
+      locAddress = `${Math.abs(alert.latitude).toFixed(5)}° ${latDir}, ${Math.abs(alert.longitude).toFixed(5)}° ${lonDir}`;
+    }
+
+    return {
+      id: `ALERT-${alert.id}`,
+      alert_id: alert.id,
+      timestamp: alert.triggered_at || new Date().toISOString(),
+      resolved_at: alert.resolved_at,
+      status: alert.status,
+      location_address: locAddress || 'San Francisco, CA (Default Demo Fix)',
+      latitude: alert.latitude,
+      longitude: alert.longitude,
+      accuracy: alert.accuracy,
+      google_maps_url:
+        alert.google_maps_url ||
+        (alert.latitude && alert.longitude
+          ? `https://www.google.com/maps/search/?api=1&query=${alert.latitude},${alert.longitude}`
+          : undefined),
+      contacts_notified_count: alert.contacts_alerted_count,
+      notes: alert.cancellation_reason
+        ? `Cancellation reason: ${alert.cancellation_reason}`
+        : alert.message || `Backend Incident Alert #${alert.id}`,
+      duration_minutes: durationMinutes,
+    };
+  };
+
+  const mergeHistoryItems = (
+    backendItems: EmergencyHistoryItem[],
+    localItems: EmergencyHistoryItem[]
+  ): EmergencyHistoryItem[] => {
+    const mergedMap = new Map<string, EmergencyHistoryItem>();
+
+    for (const b of backendItems) {
+      const key = b.alert_id ? `ALERT-${b.alert_id}` : b.id;
+      mergedMap.set(key, b);
+    }
+
+    for (const l of localItems) {
+      const alertKey = l.alert_id ? `ALERT-${l.alert_id}` : null;
+      const histKey = l.id.startsWith('HIST-') ? `ALERT-${l.id.replace('HIST-', '')}` : null;
+
+      if (alertKey && mergedMap.has(alertKey)) continue;
+      if (histKey && mergedMap.has(histKey)) continue;
+      if (mergedMap.has(l.id)) continue;
+
+      mergedMap.set(l.id, l);
+    }
+
+    return Array.from(mergedMap.values()).sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+  };
+
+  const refreshHistory = async (statusFilter?: AlertStatus): Promise<EmergencyHistoryItem[]> => {
+    try {
+      const backendAlerts = await apiService.getHistory({ status_filter: statusFilter });
+      if (Array.isArray(backendAlerts)) {
+        const mappedBackendItems = backendAlerts.map(mapAlertToHistoryItem);
+        const merged = mergeHistoryItems(mappedBackendItems, history);
+        setHistory(merged);
+        await AsyncStorage.setItem(STORAGE_HISTORY, JSON.stringify(merged));
+        return merged;
+      }
+    } catch (err) {
+      console.warn('Backend history fetch unreachable, using local session history:', err);
+    }
+    return history;
+  };
+
   const clearHistory = async () => {
     setHistory([]);
     await AsyncStorage.setItem(STORAGE_HISTORY, JSON.stringify([]));
@@ -787,6 +891,7 @@ export const SOSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteContact,
         addDemoAlertRecord,
         clearHistory,
+        refreshHistory,
         updateProfile,
         updateSettings,
         resetDemoData,

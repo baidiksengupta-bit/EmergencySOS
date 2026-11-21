@@ -19,35 +19,58 @@ import { useAuth } from '../src/context/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 
 export default function LoginScreen() {
-  const { login, isLoading } = useAuth();
+  const { login, continueInDemoMode, isLoading, authError, clearAuthError } = useAuth();
 
   const [identifier, setIdentifier] = useState('alex.morgan@emergencysos.org');
   const [password, setPassword] = useState('emergency123');
-  const [error, setError] = useState<string | null>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  const activeError = localError || authError;
 
   const handleLogin = async () => {
     if (!identifier.trim()) {
-      setError('Please provide an email or phone number.');
+      setLocalError('Please provide an email or phone number.');
       return;
     }
     if (!password.trim() || password.length < 4) {
-      setError('Please provide your account password.');
+      setLocalError('Please provide your account password (at least 4 characters).');
       return;
     }
 
-    setError(null);
-    const success = await login(identifier, password);
-    if (success) {
+    setLocalError(null);
+    clearAuthError();
+
+    const result = await login(identifier, password);
+    if (result.success) {
       router.replace('/(tabs)');
     } else {
-      Alert.alert('Login Failed', 'Unable to verify credentials. Please try again.');
+      Alert.alert(
+        'Authentication Failed',
+        result.error || 'Unable to verify credentials. Please try again or continue in Demo Mode.',
+        [
+          { text: 'Try Again', style: 'cancel' },
+          {
+            text: 'Continue in Demo Mode',
+            onPress: async () => {
+              await continueInDemoMode();
+              router.replace('/(tabs)');
+            },
+          },
+        ]
+      );
     }
+  };
+
+  const handleContinueDemo = async () => {
+    await continueInDemoMode();
+    router.replace('/(tabs)');
   };
 
   const fillDemoAccount = () => {
     setIdentifier('alex.morgan@emergencysos.org');
-    setPassword('emergency123');
-    setError(null);
+    setPassword('EmergencySecret2026');
+    setLocalError(null);
+    clearAuthError();
   };
 
   return (
@@ -86,10 +109,10 @@ export default function LoginScreen() {
 
           {/* Form Card (Crisp White Card on Navy Base) */}
           <View style={styles.formCard}>
-            {error && (
+            {activeError && (
               <View style={styles.errorAlert}>
                 <Ionicons name="alert-circle" size={18} color={Colors.emergency.primary} />
-                <Text style={styles.errorAlertText}>{error}</Text>
+                <Text style={styles.errorAlertText}>{activeError}</Text>
               </View>
             )}
 
@@ -100,7 +123,8 @@ export default function LoginScreen() {
               value={identifier}
               onChangeText={(val) => {
                 setIdentifier(val);
-                if (error) setError(null);
+                if (localError) setLocalError(null);
+                if (authError) clearAuthError();
               }}
               autoCapitalize="none"
               keyboardType="email-address"
@@ -114,7 +138,8 @@ export default function LoginScreen() {
               value={password}
               onChangeText={(val) => {
                 setPassword(val);
-                if (error) setError(null);
+                if (localError) setLocalError(null);
+                if (authError) clearAuthError();
               }}
             />
 
@@ -144,10 +169,10 @@ export default function LoginScreen() {
             </View>
 
             <Button
-              title="Skip Sign In (Enter App Directly)"
+              title="Continue in Demo Mode (Offline)"
               variant="navy"
               size="md"
-              onPress={() => router.replace('/(tabs)')}
+              onPress={handleContinueDemo}
               icon={<Ionicons name="flash-outline" size={18} color={Colors.white} />}
             />
           </View>

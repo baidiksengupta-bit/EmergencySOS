@@ -302,3 +302,179 @@ def test_cancel_emergency_alert_success(client, auth_user):
     active_res = client.get("/api/v1/sos/active", headers=auth_user["headers"])
     assert active_res.status_code == 200
     assert active_res.json() is None
+
+
+# ==============================================================================
+# 9. Authenticated vs. Unauthenticated Access Tests
+# ==============================================================================
+
+def test_get_current_user_profile_authenticated(client, auth_user):
+    """GET /api/v1/auth/me returns the profile for a valid Bearer token."""
+    response = client.get("/api/v1/auth/me", headers=auth_user["headers"])
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == auth_user["user_id"]
+    assert data["email"] == auth_user["payload"]["email"]
+    assert data["full_name"] == auth_user["payload"]["full_name"]
+
+
+def test_get_current_user_profile_unauthenticated(client):
+    """GET /api/v1/auth/me returns 401 when no token is provided."""
+    response = client.get("/api/v1/auth/me")
+    assert response.status_code == 401
+    assert "Could not validate authentication credentials" in response.json()["detail"]
+
+
+def test_get_current_user_profile_invalid_token(client):
+    """GET /api/v1/auth/me returns 401 when an invalid token is provided."""
+    response = client.get("/api/v1/auth/me", headers={"Authorization": "Bearer invalid.jwt.token"})
+    assert response.status_code == 401
+
+
+# ==============================================================================
+# 10. Emergency Contacts CRUD (Create, List, Update/Delete)
+# ==============================================================================
+
+def test_contacts_crud_lifecycle(client, auth_user):
+    """Verify complete CRUD lifecycle: create, list, and delete."""
+    # 1. Create contact
+    create_payload = {
+        "name": "Dr. Marcus Brody",
+        "phone_number": "+1 (555) 444-3322",
+        "relationship_label": "Physician",
+        "email": "brody@hospital.org",
+        "is_primary": False,
+    }
+    create_res = client.post(
+        "/api/v1/contacts/",
+        json=create_payload,
+        headers=auth_user["headers"],
+    )
+    assert create_res.status_code == 201
+    contact = create_res.json()
+    contact_id = contact["id"]
+    assert contact["name"] == create_payload["name"]
+    assert contact["user_id"] == auth_user["user_id"]
+
+    # 2. List contacts
+    list_res = client.get("/api/v1/contacts/", headers=auth_user["headers"])
+    assert list_res.status_code == 200
+    contact_ids = [c["id"] for c in list_res.json()]
+    assert contact_id in contact_ids
+
+    # 3. List contacts by user ID endpoint
+    by_user_res = client.get(f"/api/v1/contacts/user/{auth_user['user_id']}")
+    assert by_user_res.status_code == 200
+    assert any(c["id"] == contact_id for c in by_user_res.json())
+
+    # 4. Delete contact
+    del_res = client.delete(f"/api/v1/contacts/{contact_id}", headers=auth_user["headers"])
+    assert del_res.status_code == 200
+    assert del_res.json()["id"] == contact_id
+
+    # 5. Verify deleted from list
+    post_del_res = client.get("/api/v1/contacts/", headers=auth_user["headers"])
+    assert all(c["id"] != contact_id for c in post_del_res.json())
+
+
+def test_contacts_unauthenticated_without_user_id_fails(client):
+    """GET and POST /api/v1/contacts/ require authentication or explicit user_id."""
+    res_get = client.get("/api/v1/contacts/")
+    assert res_get.status_code == 400
+    assert "Authentication required" in res_get.json()["detail"]
+
+    res_post = client.post(
+        "/api/v1/contacts/",
+        json={"name": "No Auth", "phone_number": "1234567"},
+    )
+    assert res_post.status_code == 400
+
+
+# ==============================================================================
+# 11. Location Breadcrumbs during Active vs. Cancelled Alert
+# ==============================================================================
+
+def test_location_breadcrumbs_active_and_retrieval(client, auth_user):
+    """Test location breadcrumb creation, streaming, and retrieval during an active alert."""
+    # 1. Trigger alert
+    alert = client.post(
+        "/api/v1/sos/trigger",
+        json={"latitude": 37.7749, "longitude": -122.4194, "message": "Tracking test"},
+        headers=auth_user["headers"],
+    ).json()
+    alert_id = alert["id"]
+
+    # 2. Stream first breadcrumb
+    b1 = client.post(
+        "/api/v1/location/breadcrumb",
+        json={
+            "alert_id": alert_id,
+            "latitude": 37.7752,
+            "longitude": -122.4190,
+            "accuracy": 3.0,
+            "speed": 2.5,
+            "heading": 45.0,
+        },
+    )
+    assert b1.status_code == 201
+
+    # 3. Stream second breadcrumb
+    b2 = client.post(
+        "/api/v1/location/breadcrumb",
+        json={
+            "alert_id": alert_id,
+            "latitude": 37.7758,
+            "longitude": -122.4185,
+            "accuracy": 2.5,
+            "speed": 3.1,
+            "heading": 50.0,
+        },
+    )
+    assert b2.status_code == 201
+
+    # 4. Retrieve breadcrumb list for alert
+    breadcrumbs_res = client.get(f"/api/v1/location/alert/{alert_id}/breadcrumbs")
+    assert breadcrumbs_res.status_code == 200
+    breadcrumbs = breadcrumbs_res.json()
+    assert len(breadcrumbs) == 2
+    assert breadcrumbs[0]["latitude"] == pytest.approx(37.7752)
+    assert breadcrumbs[1]["latitude"] == pytest.approx(37.7758)
+
+    # 5. Retrieve alert detail which embeds breadcrumbs
+    detail_res = client.get(f"/api/v1/sos/{alert_id}")
+    assert detail_res.status_code == 200
+    detail = detail_res.json()
+    assert len(detail["breadcrumbs"]) == 2
+    assert detail["contacts_notified_count"] >= 0
+
+    # 6. Cancel the alert
+    cancel_res = client.patch(
+        f"/api/v1/sos/{alert_id}/cancel",
+        json={"reason": "Emergency resolved by first responders"},
+        headers=auth_user["headers"],
+    )
+    assert cancel_res.status_code == 200
+    assert cancel_res.json()["status"] == AlertStatus.CANCELLED
+
+    # 7. Attempting to add breadcrumbs to cancelled alert must fail with 400
+    b_cancelled = client.post(
+        "/api/v1/location/breadcrumb",
+        json={
+            "alert_id": alert_id,
+            "latitude": 37.7760,
+            "longitude": -122.4180,
+        },
+    )
+    assert b_cancelled.status_code == 400
+    assert "Cannot append telemetry to an alert in" in b_cancelled.json()["detail"]
+    assert "CANCELLED" in b_cancelled.json()["detail"]
+
+
+def test_breadcrumb_nonexistent_alert(client):
+    """POST to /location/breadcrumb for non-existent alert returns 404."""
+    response = client.post(
+        "/api/v1/location/breadcrumb",
+        json={"alert_id": 999999, "latitude": 37.7749, "longitude": -122.4194},
+    )
+    assert response.status_code == 404
+

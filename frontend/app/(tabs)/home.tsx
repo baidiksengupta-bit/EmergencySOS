@@ -125,7 +125,7 @@ export default function HomeScreen() {
     const setupAudio = async () => {
       try {
         await setAudioModeAsync({
-          playsInSilentMode: false,
+          playsInSilentMode: true,
         });
       } catch (err) {
         console.warn('Could not configure audio mode:', err);
@@ -443,7 +443,9 @@ export default function HomeScreen() {
             setElapsedSeconds(0);
             if (activeBackendAlertId) {
               try {
-                await apiService.resolveSOS(activeBackendAlertId, 'CANCELLED');
+                await apiService.cancelSOS(activeBackendAlertId, {
+                  reason: 'User cancelled - Stand down',
+                });
               } catch (e) {
                 console.warn('Could not notify backend of cancellation:', e);
               }
