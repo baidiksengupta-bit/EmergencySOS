@@ -1,8 +1,11 @@
 # 🚨 EmergencySOS
 
-A modern, real-world Emergency SOS mobile and backend application built with **React Native (Expo + TypeScript + Expo Router)** and **FastAPI (Python + SQLAlchemy + SQLite)**.
+An Emergency SOS **demonstration app** built with **React Native (Expo SDK 58 + TypeScript + Expo Router)** and **FastAPI (Python + SQLAlchemy + SQLite)**.
 
-Designed for rapid emergency response, real-time GPS location tracking, automated alerts, and seamless integration with **Google Maps** and **Firebase Cloud Messaging (FCM)**.
+It shows the full SOS flow: a panic button with a countdown, GPS location capture, live location breadcrumbs, emergency contacts, and incident history.
+
+> ⚠️ **Demonstration mode — not a real emergency service.**
+> This app does **not** contact emergency services (police, ambulance, fire) and must not be relied on in a real emergency. Alerts are stored in the local database only. Push notifications (FCM) and SMS fallback are not connected to any live delivery service. In a real emergency, call your local emergency number directly.
 
 ---
 
@@ -10,126 +13,107 @@ Designed for rapid emergency response, real-time GPS location tracking, automate
 
 ```
 EmergencySOS/
-├── .gitignore                      # Top-level workspace gitignore
-├── README.md                       # Comprehensive setup and run guide
+├── .gitignore
+├── README.md
 │
-├── backend/                        # Independent FastAPI Backend Service
+├── backend/                        # FastAPI backend service
 │   ├── app/
 │   │   ├── api/
-│   │   │   ├── deps.py             # Dependency injection (DB session, auth)
+│   │   │   ├── deps.py             # Dependency injection (DB session)
 │   │   │   └── v1/
 │   │   │       ├── api.py          # Central API v1 router
 │   │   │       └── endpoints/
-│   │   │           ├── health.py   # System health and DB connectivity check
-│   │   │           ├── sos.py      # Trigger, query, and resolve SOS alerts
-│   │   │           ├── contacts.py # Emergency contacts management (CRUD)
-│   │   │           └── location.py # Real-time GPS breadcrumbs during active SOS
+│   │   │           ├── health.py   # Service and DB health check
+│   │   │           ├── sos.py      # Trigger, query, and cancel/resolve SOS alerts
+│   │   │           ├── contacts.py # Emergency contacts (CRUD)
+│   │   │           └── location.py # GPS breadcrumbs during an active SOS
 │   │   ├── core/
-│   │   │   ├── config.py           # Pydantic Settings & environment variables
-│   │   │   └── database.py         # SQLAlchemy engine, session & declarative base
-│   │   ├── models/                 # SQLAlchemy ORM database models
-│   │   │   ├── base.py             # Timestamp mixin (created_at, updated_at)
-│   │   │   ├── user.py             # User profile model & FCM token
-│   │   │   ├── emergency_contact.py# Emergency contacts model
-│   │   │   ├── alert.py            # SOS emergency alerts model & statuses
-│   │   │   └── location_log.py     # GPS telemetry tracking breadcrumbs
-│   │   ├── schemas/                # Pydantic validation and serialization schemas
+│   │   │   ├── config.py           # Pydantic settings & environment variables
+│   │   │   └── database.py         # SQLAlchemy engine, session & base
+│   │   ├── models/                 # SQLAlchemy ORM models
+│   │   │   ├── base.py             # Timestamp mixin
 │   │   │   ├── user.py
-│   │   │   ├── contact.py
+│   │   │   ├── emergency_contact.py
 │   │   │   ├── alert.py
-│   │   │   └── location.py
-│   │   ├── services/               # Modular business logic and integrations
-│   │   │   ├── fcm_service.py      # Firebase Cloud Messaging push notification service
-│   │   │   ├── location_service.py # Geospatial calculations & geocoding helper
-│   │   │   └── sos_service.py      # Emergency broadcast orchestration
-│   │   └── main.py                 # FastAPI application, CORS middleware & lifespan
-│   ├── tests/                      # Automated test suite
-│   │   ├── conftest.py             # Pytest fixtures and in-memory test database
-│   │   └── test_health.py          # Backend sanity test
-│   ├── .env.example                # Backend environment template
-│   ├── .gitignore                  # Backend-specific gitignore
-│   ├── requirements.txt            # Production Python dependencies
-│   ├── requirements-dev.txt        # Development and testing dependencies
-│   └── run.py                      # Convenience server runner
+│   │   │   └── location_log.py
+│   │   ├── schemas/                # Pydantic schemas
+│   │   ├── services/
+│   │   │   ├── fcm_service.py      # FCM scaffolding (not connected by default)
+│   │   │   ├── location_service.py # Geospatial helpers
+│   │   │   └── sos_service.py      # SOS orchestration (demo mode)
+│   │   └── main.py                 # FastAPI app, CORS & lifespan
+│   ├── tests/
+│   │   ├── conftest.py
+│   │   └── test_health.py
+│   ├── .env.example
+│   ├── requirements.txt
+│   ├── requirements-dev.txt
+│   └── run.py
 │
-└── frontend/                       # Independent React Native / Expo Mobile App
-    ├── app/                        # Expo Router file-based route tree
-    │   ├── _layout.tsx             # Root layout with SafeAreaProvider, Auth & SOS Context
-    │   ├── index.tsx               # Root entry router (dispatches to home or welcome)
-    │   ├── welcome.tsx             # Screen 1: Welcome Hero & Onboarding
-    │   ├── login.tsx               # Screen 2: Emergency Account Login
-    │   ├── register.tsx            # Screen 3: Registration & Medical Profile Relay
-    │   ├── +not-found.tsx          # 404 fallback route
-    │   └── (tabs)/                 # Bottom tab navigator (5 main views)
-    │       ├── _layout.tsx         # Dark navy tab navigation configuration
-    │       ├── home.tsx            # Screen 4: Home / Red Emergency SOS Panic Button
-    │       ├── location.tsx        # Screen 6: Live GPS Telemetry, Radar & Map Fix
-    │       ├── contacts.tsx        # Screen 5: Emergency Response Contacts (CRUD)
-    │       ├── history.tsx         # Screen 7: Incident History & Telemetry Log
-    │       └── settings.tsx        # Screen 8: Profile, Medical Notes & Diagnostics
-    ├── assets/
-    │   └── images/                 # App icon, splash screen, and adaptive icon
+└── frontend/                       # React Native / Expo app
+    ├── app/                        # Expo Router file-based routes
+    │   ├── _layout.tsx
+    │   ├── index.tsx
+    │   ├── welcome.tsx
+    │   ├── login.tsx
+    │   ├── register.tsx
+    │   ├── +not-found.tsx
+    │   └── (tabs)/
+    │       ├── _layout.tsx
+    │       ├── home.tsx            # SOS panic button
+    │       ├── location.tsx        # Live GPS and map
+    │       ├── contacts.tsx        # Emergency contacts
+    │       ├── history.tsx         # Incident history
+    │       └── settings.tsx        # Profile and medical notes
+    ├── assets/images/
     ├── src/
-    │   ├── components/
-    │   │   ├── common/             # Reusable UI widgets (Button, Input, Card, Badge, Header)
-    │   │   └── sos/                # Domain widgets (SOSButton, CountdownModal, ActiveAlertBanner)
-    │   ├── constants/
-    │   │   ├── Colors.ts           # Dark Navy (#0A1128), White, and Emergency Red (#DC2626) theme
-    │   │   └── Config.ts           # Frontend runtime configuration
-    │   ├── context/
-    │   │   ├── AuthContext.tsx     # Authentication, session & medical profile state
-    │   │   └── SOSContext.tsx      # Emergency broadcast, countdown timer & telemetry state
-    │   ├── services/
-    │   │   ├── api.ts              # Axios API client for FastAPI endpoints
-    │   │   ├── location.ts         # expo-location GPS permission & reverse geocode
-    │   │   └── notifications.ts    # Push notification helper
+    │   ├── components/             # common/ and sos/ widgets
+    │   ├── constants/              # Colors.ts, Config.ts
+    │   ├── context/                # AuthContext.tsx, SOSContext.tsx
+    │   ├── services/               # api.ts, location.ts, notifications.ts
     │   └── types/
-    │       └── index.ts            # TypeScript interfaces & types
-    ├── .env.example                # Mobile environment template
-    ├── .gitignore                  # Frontend-specific gitignore
-    ├── app.json                    # Expo project configuration and native permissions
-    ├── babel.config.js             # Babel compiler preset
-    ├── package.json                # NPM package definitions
-    └── tsconfig.json               # TypeScript path alias configuration (@/*)
+    ├── .env.example
+    ├── app.json
+    ├── babel.config.js
+    ├── package.json
+    └── tsconfig.json
 ```
 
 ---
 
 ## 🛠️ Technology Stack
 
-### Mobile Frontend:
-- **Framework:** React Native with [Expo SDK 52](https://expo.dev)
+### Mobile frontend
+- **Framework:** React Native with [Expo SDK 58](https://expo.dev)
 - **Language:** TypeScript
-- **Navigation:** [Expo Router v4](https://docs.expo.dev/router/introduction/) (File-based navigation)
-- **State Management:** React Context API (`SOSContext`)
-- **Location Services:** `expo-location` (High accuracy GPS telemetry)
-- **Maps:** `react-native-maps` (Prepared for Google Maps)
+- **Navigation:** [Expo Router](https://docs.expo.dev/router/introduction/) (file-based)
+- **State management:** React Context (`AuthContext`, `SOSContext`)
+- **Location:** `expo-location`
+- **Maps:** `react-native-maps`
 - **Networking:** `axios`
 
-### Backend Service:
+### Backend
 - **Framework:** [FastAPI](https://fastapi.tiangolo.com)
 - **Language:** Python 3.10+
-- **Database & ORM:** [SQLAlchemy 2.0](https://www.sqlalchemy.org) with SQLite (zero-config, thread-safe)
-- **Validation:** [Pydantic v2](https://docs.pydantic.dev) & `pydantic-settings`
-- **Server:** [Uvicorn](https://www.uvicorn.org) ASGI server
-- **Push Notifications:** `firebase-admin` (Prepared for FCM)
+- **Database / ORM:** [SQLAlchemy 2.0](https://www.sqlalchemy.org) with SQLite
+- **Validation:** [Pydantic v2](https://docs.pydantic.dev) and `pydantic-settings`
+- **Server:** [Uvicorn](https://www.uvicorn.org)
+- **Push notifications:** `firebase-admin` (scaffolding only; not connected by default)
 
 ---
 
 ## 🚀 Getting Started
 
-Both frontend and backend are configured to run completely independently. Follow the steps below to start each service.
+The frontend and backend run independently. Start the backend first.
 
----
+### Part 1: Backend
 
-### Part 1: Backend Setup & Execution
-
-#### 1. Navigate to the backend directory:
 ```bash
 cd backend
 ```
 
-#### 2. Create and activate a Python virtual environment:
+Create and activate a virtual environment:
+
 - **Windows (PowerShell):**
   ```powershell
   python -m venv venv
@@ -141,107 +125,91 @@ cd backend
   source venv/bin/activate
   ```
 
-#### 3. Install backend dependencies:
+Install dependencies (add `requirements-dev.txt` for tests):
+
 ```bash
 pip install -r requirements.txt
+pip install -r requirements-dev.txt   # optional
 ```
-*(Optional: Install test tools with `pip install -r requirements-dev.txt`)*
 
-#### 4. Configure environment variables:
-Create a `.env` file from the provided template:
-- **Windows (PowerShell):**
-  ```powershell
-  Copy-Item .env.example .env
-  ```
-- **macOS / Linux:**
-  ```bash
-  cp .env.example .env
-  ```
+Create your environment file:
 
-#### 5. Run the FastAPI development server:
+- **Windows (PowerShell):** `Copy-Item .env.example .env`
+- **macOS / Linux:** `cp .env.example .env`
+
+Run the server:
+
 ```bash
 python run.py
-```
-*Or alternatively with uvicorn directly:*
-```bash
+# or
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-#### 6. Verify Backend:
-Open your browser and navigate to:
-- **Interactive Swagger API Docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
-- **ReDoc Documentation:** [http://localhost:8000/redoc](http://localhost:8000/redoc)
-- **Health Check Endpoint:** [http://localhost:8000/api/v1/health](http://localhost:8000/api/v1/health)
+Verify it is running:
+- Swagger docs: <http://localhost:8000/docs>
+- ReDoc: <http://localhost:8000/redoc>
+- Health check: <http://localhost:8000/api/v1/health>
 
----
+Run the tests:
 
-### Part 2: Frontend Setup & Execution
-
-#### 1. Open a new terminal and navigate to the frontend directory:
 ```bash
-cd frontend
+pytest
 ```
 
-#### 2. Install mobile dependencies:
+### Part 2: Frontend
+
+In a new terminal:
+
 ```bash
+cd frontend
 npm install
 ```
 
-#### 3. Configure environment variables:
-Create a `.env` file from `.env.example`:
-- **Windows (PowerShell):**
-  ```powershell
-  Copy-Item .env.example .env
-  ```
-- **macOS / Linux:**
-  ```bash
-  cp .env.example .env
-  ```
+Create your environment file:
 
-> 💡 **Important for Physical Mobile Testing:**
-> If testing on a physical phone via the Expo Go app, change `EXPO_PUBLIC_API_BASE_URL` in `frontend/.env` to your computer's local Wi-Fi IP address (e.g. `http://192.168.1.100:8000/api/v1`), because `localhost` on a mobile device refers to the phone itself.
-> - Android Emulator default loopback: `http://10.0.2.2:8000/api/v1`
-> - iOS Simulator / Web: `http://localhost:8000/api/v1`
+- **Windows (PowerShell):** `Copy-Item .env.example .env`
+- **macOS / Linux:** `cp .env.example .env`
 
-#### 4. Start the Expo development server:
+> 💡 **Set the API URL for your device.** `localhost` on a phone refers to the phone itself, so set `EXPO_PUBLIC_API_BASE_URL` in `frontend/.env` to match where you run the app:
+> - Physical phone (Expo Go): your computer's Wi-Fi IP, e.g. `http://192.168.1.100:8000/api/v1`
+> - Android emulator: `http://10.0.2.2:8000/api/v1`
+> - iOS simulator / web: `http://localhost:8000/api/v1`
+
+Start Expo:
+
 ```bash
 npm run start
 ```
 
-#### 5. Launch the application:
-- **Web Browser:** Press `w` in the Expo terminal or run `npm run web`.
-- **Android Emulator / Device:** Press `a` or scan the terminal QR code with the **Expo Go** app.
-- **iOS Simulator / Device:** Press `i` or scan the terminal QR code with the iOS Camera app.
+Then press `w` (web), `a` (Android), or `i` (iOS), or scan the QR code with Expo Go. Your Expo Go app must support SDK 58.
 
 ---
 
-## 📡 RESTful API Endpoints Overview
+## 📡 API Endpoints
 
-All endpoints are prefixed with `/api/v1` and interactive documentation is available at [http://localhost:8000/docs](http://localhost:8000/docs).
+All endpoints are prefixed with `/api/v1`. Interactive docs are at <http://localhost:8000/docs>, which is the source of truth if this table ever drifts from the code.
 
-| # | Method | Endpoint | Description | Auth Required |
-|---|---|---|---|---|
-| 1 | `POST` | `/api/v1/auth/register` | User registration with PBKDF2/bcrypt password hashing | No |
-| 2 | `POST` | `/api/v1/auth/login` | User login (returns JWT Bearer token & profile) | No |
-| - | `GET` | `/api/v1/auth/me` | Fetch authenticated user profile | Bearer Token |
-| 3 | `POST` | `/api/v1/contacts/` | Add a new emergency contact (with primary toggle) | Bearer Token / `user_id` |
-| 4 | `DELETE` | `/api/v1/contacts/{contact_id}` | Remove an emergency contact | Bearer Token / `user_id` |
-| - | `GET` | `/api/v1/contacts/` | List all emergency contacts for current user | Bearer Token / `user_id` |
-| 5 | `POST` | `/api/v1/sos/trigger` | Create SOS alert with GPS coordinates & broadcast | Bearer Token / `user_id` |
-| 6 | `POST` | `/api/v1/location/breadcrumb` | Save live GPS telemetry coordinates during active alert | No |
-| - | `GET` | `/api/v1/location/alert/{alert_id}/breadcrumbs` | Fetch recorded GPS coordinates breadcrumb stream | No |
-| 7 | `GET` | `/api/v1/sos/history` | Fetch emergency incident history (with status filter) | Bearer Token / `user_id` |
-| 8 | `PATCH` | `/api/v1/sos/{alert_id}/cancel` | Cancel or resolve emergency alert with reason & PIN | Bearer Token / `user_id` |
-| - | `GET` | `/api/v1/sos/active` | Fetch current active emergency alert for user | Bearer Token / `user_id` |
-| - | `GET` | `/api/v1/health` | Backend service status & SQLite DB health check | No |
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/health` | Service status and SQLite connectivity check |
+| `GET` | `/contacts/` | List the user's emergency contacts |
+| `POST` | `/contacts/` | Add an emergency contact (with primary toggle) |
+| `DELETE` | `/contacts/{contact_id}` | Remove an emergency contact |
+| `POST` | `/sos/trigger` | Create an SOS alert with GPS coordinates (demo mode) |
+| `GET` | `/sos/active` | Fetch the user's current active alert |
+| `GET` | `/sos/history` | Incident history, with optional status filter |
+| `PATCH` | `/sos/{alert_id}/cancel` | Cancel or resolve an alert |
+| `POST` | `/location/breadcrumb` | Save a GPS breadcrumb during an active alert |
+| `GET` | `/location/alert/{alert_id}/breadcrumbs` | Fetch recorded breadcrumbs for an alert |
 
 ---
 
-## 🛡️ Next Development Steps
+## 🛡️ Roadmap
 
-1. **User Authentication:** Add JWT or OTP verification for mobile users.
-2. **Google Maps Visualisation:** Provide live polyline tracking of breadcrumbs on the map screen.
-3. **Firebase Cloud Messaging:** Plug in active FCM credentials in `backend/.env` for real-time mobile push notifications.
-4. **SMS / Twilio Fallback:** Add automated SMS dispatch if data connection is degraded during an SOS event.
-#   E m e r g e n c y S O S  
- 
+These are **not implemented yet**:
+
+1. **Backend authentication:** JWT or OTP verification for mobile users.
+2. **Live map tracking:** polyline rendering of breadcrumbs on the map screen.
+3. **Push notifications:** connect real FCM credentials in `backend/.env`.
+4. **SMS fallback:** automated SMS (e.g. Twilio) when data connectivity is poor.
+5. **Real emergency dispatch:** integration with an actual emergency response channel, which would require careful legal and safety review before this app is used outside demonstration.
