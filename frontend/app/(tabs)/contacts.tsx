@@ -19,8 +19,9 @@ import { Card } from '../../src/components/common/Card';
 import { Badge } from '../../src/components/common/Badge';
 import { Input } from '../../src/components/common/Input';
 import { Button } from '../../src/components/common/Button';
-import { useSOS } from '../../src/context/SOSContext';
+import { useSOS, STORAGE_DELETED_CONTACTS } from '../../src/context/SOSContext';
 import { useAuth } from '../../src/context/AuthContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { EmergencyContact, ContactPriority } from '../../src/types';
 import { apiService, isLocalContactId } from '../../src/services/api';
 import { Ionicons } from '@expo/vector-icons';
@@ -106,22 +107,37 @@ export default function ContactsScreen() {
         return;
       }
 
+      // Load IDs of contacts that were deleted locally so we never resurrect them
+      let deletedIds = new Set<number>();
+      try {
+        const rawDeleted = await AsyncStorage.getItem(STORAGE_DELETED_CONTACTS);
+        if (rawDeleted) {
+          const parsed: number[] = JSON.parse(rawDeleted);
+          if (Array.isArray(parsed)) {
+            deletedIds = new Set(parsed);
+          }
+        }
+      } catch {}
+
       const data = await apiService.getContacts(targetUserId);
 
       if (Array.isArray(data)) {
-        setBackendContacts(data);
+        // Filter out any contacts that have been marked deleted
+        const activeBackendContacts = data.filter((c) => !deletedIds.has(c.id));
+        setBackendContacts(activeBackendContacts);
         setBackendStatus('connected');
         setLastHttpError(null);
 
         // Sync local contacts to backend upon login or connection retry
         const existingPhones = new Set(
-          data.map((c) => c.phone_number.replace(/\D/g, ''))
+          activeBackendContacts.map((c) => c.phone_number.replace(/\D/g, ''))
         );
         const existingNames = new Set(
-          data.map((c) => c.name.toLowerCase().trim())
+          activeBackendContacts.map((c) => c.name.toLowerCase().trim())
         );
 
         const unsynced = contacts.filter((local) => {
+          if (deletedIds.has(local.id)) return false;
           const cleanPhone = local.phone_number.replace(/\D/g, '');
           const cleanName = local.name.toLowerCase().trim();
           return !existingPhones.has(cleanPhone) && !existingNames.has(cleanName);
@@ -146,7 +162,7 @@ export default function ContactsScreen() {
           // Refresh backend contacts after pushing local entries
           const refreshed = await apiService.getContacts(targetUserId);
           if (Array.isArray(refreshed)) {
-            setBackendContacts(refreshed);
+            setBackendContacts(refreshed.filter((c) => !deletedIds.has(c.id)));
           }
         }
       }
@@ -171,9 +187,9 @@ export default function ContactsScreen() {
     syncLocalContactsToBackend(true);
   }, [isAuthenticated, user?.id]);
 
-  // Display priority: backend contacts if loaded and non-empty, otherwise local contacts
+  // Display priority: backend contacts if loaded, otherwise local contacts
   const displayContacts =
-    backendStatus === 'connected' && backendContacts !== null && backendContacts.length > 0
+    backendStatus === 'connected' && backendContacts !== null
       ? backendContacts
       : contacts;
 
@@ -363,11 +379,11 @@ export default function ContactsScreen() {
               }
             }
 
-            // Always remove from local device storage (AsyncStorage)
-            await deleteContact(contact.id);
+            // 1. Immediately remove from local backendContacts state cache (optimistic local delete)
+            setBackendContacts((prev) => (prev ? prev.filter((c) => c.id !== contact.id) : []));
 
-            // Also remove from local backendContacts state cache if present
-            setBackendContacts((prev) => (prev ? prev.filter((c) => c.id !== contact.id) : null));
+            // 2. Always remove from local device storage (AsyncStorage + SOSContext state)
+            await deleteContact(contact.id);
 
             Alert.alert(
               'Contact Removed',
@@ -375,10 +391,6 @@ export default function ContactsScreen() {
                 ? `${contact.name} was removed from the backend database.`
                 : `${contact.name} was removed from this device.`
             );
-
-            if (isBackendConnected && !isLocalOnly) {
-              syncLocalContactsToBackend(false);
-            }
           },
         },
       ]

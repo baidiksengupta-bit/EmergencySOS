@@ -147,6 +147,16 @@ def get_active_sos(
     summary="Fetch emergency history",
     description="Retrieves archived emergency incidents for a user, with optional status filtering.",
 )
+@router.get(
+    "",
+    response_model=List[AlertResponse],
+    include_in_schema=False,
+)
+@router.get(
+    "/",
+    response_model=List[AlertResponse],
+    include_in_schema=False,
+)
 def fetch_emergency_history(
     user_id: Optional[int] = None,
     status_filter: Optional[AlertStatus] = Query(None, description="Filter by status (RESOLVED, CANCELLED, TRIGGERED)"),
@@ -155,10 +165,8 @@ def fetch_emergency_history(
 ):
     target_user_id = current_user.id if current_user else user_id
     if not target_user_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Authentication required or specify user_id parameter.",
-        )
+        # Unauthenticated / demo mode has no backend records; return empty array cleanly
+        return []
 
     query = db.query(SOSAlert).filter(SOSAlert.user_id == target_user_id)
     if status_filter:

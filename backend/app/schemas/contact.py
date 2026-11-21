@@ -4,11 +4,14 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class ContactBase(BaseModel):
-    name: str = Field(..., min_length=2, max_length=120, description="Contact full name")
-    phone_number: str = Field(..., min_length=5, max_length=25, description="Contact phone number")
-    relationship_label: str = Field("Family", max_length=50, description="e.g. Spouse, Parent, Doctor")
-    email: Optional[EmailStr] = Field(None, description="Optional email for notification relay")
-    is_primary: bool = Field(False, description="Set as primary first-responder contact")
+    name: str = Field(..., min_length=1, max_length=120, description="Contact full name")
+    phone_number: str = Field(..., min_length=3, max_length=25, description="Contact phone number")
+    relationship_label: Optional[str] = Field("Family", max_length=50, description="e.g. Spouse, Parent, Doctor")
+    relationship: Optional[str] = Field(None, max_length=50, description="Alias for relationship_label")
+    priority: Optional[str] = Field(None, description="Optional priority level string")
+    priority_level: Optional[str] = Field(None, description="Alias for priority")
+    email: Optional[str] = Field(None, description="Optional email for notification relay")
+    is_primary: Optional[bool] = Field(False, description="Set as primary first-responder contact")
 
 
 class ContactCreate(ContactBase):
@@ -16,10 +19,13 @@ class ContactCreate(ContactBase):
 
 
 class ContactUpdate(BaseModel):
-    name: Optional[str] = Field(None, min_length=2, max_length=120)
-    phone_number: Optional[str] = Field(None, min_length=5, max_length=25)
+    name: Optional[str] = Field(None, min_length=1, max_length=120)
+    phone_number: Optional[str] = Field(None, min_length=3, max_length=25)
     relationship_label: Optional[str] = Field(None, max_length=50)
-    email: Optional[EmailStr] = None
+    relationship: Optional[str] = Field(None, max_length=50)
+    priority: Optional[str] = None
+    priority_level: Optional[str] = None
+    email: Optional[str] = None
     is_primary: Optional[bool] = None
 
 

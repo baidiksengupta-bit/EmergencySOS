@@ -66,6 +66,7 @@ interface SOSContextType {
 const SOSContext = createContext<SOSContextType | undefined>(undefined);
 
 const STORAGE_CONTACTS = '@emergencysos_contacts';
+export const STORAGE_DELETED_CONTACTS = '@emergencysos_deleted_contact_ids';
 const STORAGE_HISTORY = '@emergencysos_history';
 const STORAGE_PROFILE = '@emergencysos_profile';
 const STORAGE_SETTINGS = '@emergencysos_settings';
@@ -808,29 +809,93 @@ export const SOSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       synced: contactIn.synced ?? (newId < 1000000000000),
     };
 
-    let updated = [...contacts, newContact];
-    if (newContact.is_primary) {
-      updated = updated.map((c) => (c.id === newId ? c : { ...c, is_primary: false, priority_level: c.priority_level === 'PRIMARY' ? 'HIGH' : c.priority_level }));
-    }
+    setContacts((prevContacts) => {
+      let updated = [...prevContacts, newContact];
+      if (newContact.is_primary) {
+        updated = updated.map((c) =>
+          c.id === newId
+            ? c
+            : {
+                ...c,
+                is_primary: false,
+                priority_level: c.priority_level === 'PRIMARY' ? 'HIGH' : c.priority_level,
+              }
+        );
+      }
+      AsyncStorage.setItem(STORAGE_CONTACTS, JSON.stringify(updated)).catch((err) =>
+        console.warn('[SOSContext] Error saving new contact to AsyncStorage:', err)
+      );
+      return updated;
+    });
 
-    setContacts(updated);
-    await AsyncStorage.setItem(STORAGE_CONTACTS, JSON.stringify(updated));
+    // Un-mark from deleted list if re-adding
+    try {
+      const rawDeleted = await AsyncStorage.getItem(STORAGE_DELETED_CONTACTS);
+      if (rawDeleted) {
+        const deletedIds: number[] = JSON.parse(rawDeleted);
+        const filtered = deletedIds.filter((id) => id !== newId);
+        await AsyncStorage.setItem(STORAGE_DELETED_CONTACTS, JSON.stringify(filtered));
+      }
+    } catch {}
   };
 
   const updateContact = async (id: number, contactIn: Partial<EmergencyContact>) => {
     const isPrim = contactIn.priority_level === 'PRIMARY' || contactIn.is_primary;
-    let updated = contacts.map((c) => (c.id === id ? { ...c, ...contactIn, ...(contactIn.priority_level ? { is_primary: isPrim } : {}) } : c));
-    if (isPrim) {
-      updated = updated.map((c) => (c.id === id ? { ...c, is_primary: true, priority_level: 'PRIMARY' } : { ...c, is_primary: false, priority_level: c.priority_level === 'PRIMARY' ? 'HIGH' : c.priority_level }));
-    }
-    setContacts(updated);
-    await AsyncStorage.setItem(STORAGE_CONTACTS, JSON.stringify(updated));
+    setContacts((prevContacts) => {
+      let updated = prevContacts.map((c) =>
+        c.id === id
+          ? { ...c, ...contactIn, ...(contactIn.priority_level ? { is_primary: isPrim } : {}) }
+          : c
+      );
+      if (isPrim) {
+        updated = updated.map((c) =>
+          c.id === id
+            ? { ...c, is_primary: true, priority_level: 'PRIMARY' }
+            : {
+                ...c,
+                is_primary: false,
+                priority_level: c.priority_level === 'PRIMARY' ? 'HIGH' : c.priority_level,
+              }
+        );
+      }
+      AsyncStorage.setItem(STORAGE_CONTACTS, JSON.stringify(updated)).catch((err) =>
+        console.warn('[SOSContext] Error updating contact in AsyncStorage:', err)
+      );
+      return updated;
+    });
   };
 
   const deleteContact = async (id: number) => {
-    const updated = contacts.filter((c) => c.id !== id);
-    setContacts(updated);
-    await AsyncStorage.setItem(STORAGE_CONTACTS, JSON.stringify(updated));
+    // 1. Immediately update React state with functional filter (optimistic delete)
+    setContacts((prevContacts) => {
+      const updated = prevContacts.filter((c) => c.id !== id);
+      AsyncStorage.setItem(STORAGE_CONTACTS, JSON.stringify(updated)).catch((err) =>
+        console.warn('[SOSContext] Error saving deleted contacts to AsyncStorage:', err)
+      );
+      return updated;
+    });
+
+    // 2. Mark this ID as deleted to prevent background sync resurrection
+    try {
+      const rawDeleted = await AsyncStorage.getItem(STORAGE_DELETED_CONTACTS);
+      const deletedIds: number[] = rawDeleted ? JSON.parse(rawDeleted) : [];
+      if (!deletedIds.includes(id)) {
+        deletedIds.push(id);
+        await AsyncStorage.setItem(STORAGE_DELETED_CONTACTS, JSON.stringify(deletedIds));
+      }
+
+      // 3. Direct AsyncStorage update to guarantee immediate persistence
+      const rawStored = await AsyncStorage.getItem(STORAGE_CONTACTS);
+      if (rawStored) {
+        const parsed = JSON.parse(rawStored);
+        if (Array.isArray(parsed)) {
+          const filtered = parsed.filter((c: any) => c.id !== id);
+          await AsyncStorage.setItem(STORAGE_CONTACTS, JSON.stringify(filtered));
+        }
+      }
+    } catch (e) {
+      console.warn('[SOSContext] Error persisting deleteContact to storage:', e);
+    }
   };
 
   const addDemoAlertRecord = async (locationInfo?: {

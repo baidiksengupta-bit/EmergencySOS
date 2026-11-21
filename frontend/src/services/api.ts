@@ -335,13 +335,20 @@ export const apiService = {
    * Returns List[AlertResponse] (SOSAlert[])
    */
   getHistory: async (params?: HistoryQueryParams): Promise<SOSAlert[]> => {
-    const response = await apiClient.get<SOSAlert[]>('/sos/history', {
-      params: {
-        ...(params?.user_id ? { user_id: params.user_id } : {}),
-        ...(params?.status_filter ? { status_filter: params.status_filter } : {}),
-      },
-    });
-    return response.data;
+    try {
+      const response = await apiClient.get<SOSAlert[]>('/sos/history', {
+        params: {
+          ...(params?.user_id ? { user_id: params.user_id } : {}),
+          ...(params?.status_filter ? { status_filter: params.status_filter } : {}),
+        },
+      });
+      return response.data;
+    } catch (err: any) {
+      if (err?.response?.status === 400 || err?.response?.status === 401) {
+        return [];
+      }
+      throw err;
+    }
   },
 
   // Emergency Contacts operations
