@@ -25,3 +25,5 @@ httpx>=0.27.2
 
 # Firebase Cloud Messaging & Push Notifications (Prepared for integration)
 firebase-admin>=6.5.0
+
+email-validator>=2.1.0
