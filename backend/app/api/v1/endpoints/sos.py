@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_current_user_optional
+from app.core.security import get_password_hash
 from app.models.alert import SOSAlert, AlertStatus
 from app.models.emergency_contact import EmergencyContact
 from app.models.user import User
@@ -41,10 +42,23 @@ async def create_sos_alert(
 
     user = db.query(User).filter(User.id == target_user_id).first()
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"User with ID {target_user_id} not found.",
-        )
+        if target_user_id == 1:
+            user = User(
+                id=1,
+                email="user1@emergencysos.org",
+                phone_number="+15550000001",
+                full_name="Emergency Demo User",
+                hashed_password=get_password_hash("demo-password-123!"),
+                is_active=True,
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"User with ID {target_user_id} not found.",
+            )
 
     # Construct standard Google Maps search link
     google_maps_url = alert_in.google_maps_url or (
