@@ -1,0 +1,104 @@
+# ==============================================================================
+# EmergencySOS - Root .gitignore
+# ==============================================================================
+
+# Operating System Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+[Dd]esktop.ini
+
+# Editor & IDE Directories
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.sublime-workspace
+*.sublime-project
+*.swp
+*.swo
+*~
+
+# Environment & Secret Files (Keep templates only)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+!*.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ==============================================================================
+# Backend (Python / FastAPI / SQLAlchemy / SQLite)
+# ==============================================================================
+backend/__pycache__/
+backend/*/__pycache__/
+backend/*/*/__pycache__/
+backend/*/*/*/__pycache__/
+*.py[cod]
+*$py.class
+
+# Python Virtual Environments
+backend/venv/
+backend/.venv/
+backend/env/
+backend/.env/
+venv/
+.venv/
+env/
+ENV/
+
+# Database files
+backend/*.db
+backend/*.sqlite
+backend/*.sqlite3
+*.db
+*.sqlite
+*.sqlite3
+
+# Python Testing & Coverage
+backend/.pytest_cache/
+backend/.coverage
+backend/htmlcov/
+backend/.mypy_cache/
+backend/.ruff_cache/
+
+# Distribution & Build
+backend/build/
+backend/dist/
+backend/*.egg-info/
+
+# ==============================================================================
+# Frontend (React Native / Expo / TypeScript)
+# ==============================================================================
+frontend/node_modules/
+node_modules/
+frontend/.expo/
+.expo/
+frontend/dist/
+frontend/web-build/
+
+# Native build folders (if prebuild is used)
+frontend/android/
+frontend/ios/
+*.orig.*
+
+# Expo temporary files
+frontend/.expo-shared/
+
+# TypeScript declaration cache
+frontend/*.tsbuildinfo
+*.tsbuildinfo
