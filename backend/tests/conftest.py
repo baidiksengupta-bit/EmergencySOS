@@ -4,9 +4,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.main import app
-from app.core.database import Base, get_db
 import app.models  # Register all models
+from app.core.database import Base, get_db
+from app.main import app
 
 # Use in-memory SQLite with StaticPool for test isolation
 SQLALCHEMY_TEST_DATABASE_URL = "sqlite:///:memory:"
@@ -48,7 +48,7 @@ def auth_user(client):
     user_payload = {
         "full_name": "Test Guardian",
         "phone_number": "+1 (555) 123-4567",
-        "email": "guardian@emergency.test",
+        "email": "guardian@emergency.org",
         "password": "SecurePassword123!",
         "blood_group": "A+",
         "allergies": "None",

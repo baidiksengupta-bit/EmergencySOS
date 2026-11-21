@@ -13,6 +13,7 @@ from app.schemas.alert import (
     AlertResponse,
     AlertDetailResponse,
     AlertBreadcrumbDetail,
+    NotificationDeliveryReport,
 )
 from app.services.fcm_service import fcm_service
 
@@ -92,7 +93,7 @@ async def create_sos_alert(
 
     # Prepare response with verified delivery report
     alert_response = AlertResponse.model_validate(alert)
-    alert_response.delivery_report = delivery_data
+    alert_response.delivery_report = NotificationDeliveryReport(**delivery_data)
     return alert_response
 
 
